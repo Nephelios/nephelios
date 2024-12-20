@@ -1,0 +1,66 @@
+name: Rust CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Install dependencies
+        run: |
+          rustup component add clippy
+          rustup component add rustfmt
+
+      - name: Run tests
+        run: |
+          cargo test --verbose
+
+      - name: Build documentation
+        if: success()
+        run: |
+          cargo doc --no-deps --document-private-items
+
+      - name: Create redirect index.html
+        if: success()
+        run: |
+          echo '<meta http-equiv="refresh" content="0; url=nephelios/index.html">' > target/doc/index.html
+
+  deploy:
+    # Only deploy documentation after the build job passes and a push to main occurs
+    needs: build
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Deploy documentation to GitHub Pages
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git fetch origin
+          git checkout gh-pages || git checkout --orphan gh-pages
+          git reset --hard
+          cp -r target/doc/* ./
+          git add .
+          git commit -m "Update documentation"
+          git push --force "https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" gh-pages
