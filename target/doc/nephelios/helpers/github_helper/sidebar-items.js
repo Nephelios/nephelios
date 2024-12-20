@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["clone_repo","create_temp_dir","remove_temp_dir"]};
