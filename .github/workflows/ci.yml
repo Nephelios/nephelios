@@ -48,7 +48,8 @@ jobs:
           git fetch origin
           git checkout gh-pages || git checkout --orphan gh-pages
           git reset --hard
-          cp -r target/doc/* ./
+          mkdir -p nephelios
+          cp -r target/doc/nephelios/* nephelios/
           git add .
           git commit -m "Update documentation"
           git push --force "https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" gh-pages
