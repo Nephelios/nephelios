@@ -7,7 +7,7 @@ use crate::helpers::github_helper as github;
 
 /// Orchestrates the entire deployment pipeline:
 /// 1. Clones a GitHub repository.
-/// 2. Generates and writes a Dockerfile.
+/// 2. Generate and write a Dockerfile.
 /// 3. Builds a Docker image.
 /// 4. Runs a Docker container.
 /// 5. Cleans up the temporary directory.
