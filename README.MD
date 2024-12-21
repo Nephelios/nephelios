@@ -1,3 +1,4 @@
+```
 project/
 ├── src/
 │ ├── main.rs # Entry point
@@ -24,5 +25,6 @@ project/
 ├── Cargo.toml # Dependencies and project config
 ├── README.md # Documentation
 └── .env # Environment variables
+```
 
 This is the architecture we tend to achieve
