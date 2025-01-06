@@ -44,24 +44,38 @@ pub fn health_check_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
 ///
 /// A result containing a Warp reply or a Warp rejection.
 async fn handle_create_app(body: serde_json::Value) -> Result<impl warp::Reply, warp::Rejection> {
-    let app_name = body["app_name"].as_str().unwrap_or("default-app");
-    let app_type = body["app_type"].as_str().unwrap_or("nodejs");
-    let github_url = body["github_url"].as_str().unwrap_or("");
+    // Extract values safely using Option and Result handling
+    let app_name = body
+        .get("app_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default-app");
+    let app_type = body
+        .get("app_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("nodejs");
+    let github_url = body.get("github_url").and_then(|v| v.as_str());
 
-    if github_url.is_empty() {
-        return Ok(warp::reply::with_status(
+    if let Some(github_url) = github_url {
+        if github_url.is_empty() {
+            return Ok(warp::reply::with_status(
+                "GitHub URL is required".to_string(),
+                warp::http::StatusCode::BAD_REQUEST,
+            ));
+        }
+
+        let string_response = format!(
+            "Created app: {} of type: {} with GitHub URL: {}",
+            app_name, app_type, github_url
+        );
+
+        Ok(warp::reply::with_status(
+            string_response,
+            warp::http::StatusCode::CREATED,
+        ))
+    } else {
+        Ok(warp::reply::with_status(
             "GitHub URL is required".to_string(),
             warp::http::StatusCode::BAD_REQUEST,
-        ));
+        ))
     }
-
-    let string_response = format!(
-        "Created app: {} of type: {} with GitHub URL: {}",
-        app_name, app_type, github_url
-    );
-
-    Ok(warp::reply::with_status(
-        string_response,
-        warp::http::StatusCode::CREATED,
-    ))
 }
