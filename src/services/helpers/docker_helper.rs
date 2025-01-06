@@ -35,9 +35,7 @@ pub fn generate_and_write_dockerfile(app_type: &str, app_path: &str) -> Result<(
             CMD ["python", "app.py"]
             "#
         }
-        _ => {
-            return Err(format!("Unsupported app type: {}", app_type));
-        }
+        _ => return Err(format!("Unsupported app type: {}", app_type)),
     };
 
     let dockerfile_path = Path::new(app_path).join("Dockerfile");

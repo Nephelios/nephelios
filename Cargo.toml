@@ -7,6 +7,8 @@ edition = "2021"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "0.8", features = ["v4"] }
 dirs = "*"
+warp = "*"
+serde_json = "*"
 
 [[bin]]
 name = "nephelios"
