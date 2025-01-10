@@ -14,31 +14,48 @@ use std::process::Command;
 /// * `Ok(())` if the Dockerfile was created and written successfully.
 /// * `Err(String)` if there was an error during the creation or writing of the Dockerfile.
 pub fn generate_and_write_dockerfile(app_type: &str, app_path: &str) -> Result<(), String> {
+    let dockerfile_path = Path::new(app_path).join("Dockerfile");
+
+    // Check if the Dockerfile already exists
+    if dockerfile_path.exists() {
+        println!("Dockerfile already exists at {}", dockerfile_path.display());
+        return Ok(());
+    }
+
     let dockerfile_content = match app_type {
         "nodejs" => {
             r#"
-            FROM node:14
+            FROM node:18
             WORKDIR /app
+            # Copy package.json and package-lock.json (if available) for dependency caching
             COPY package*.json ./
-            RUN npm install
+            RUN npm install --production
+            # Copy the rest of the application code
             COPY . .
-            CMD ["node", "index.js"]
-            "#
+            # Expose a default port for documentation purposes
+            EXPOSE 3000
+            # Use npm start as the default entry point
+            CMD ["npm", "start"]
+        "#
         }
         "python" => {
             r#"
             FROM python:3.8-slim
             WORKDIR /app
+            # Copy the requirements file for dependency installation
             COPY requirements.txt ./
             RUN pip install --no-cache-dir -r requirements.txt
+            # Copy the rest of the application code
             COPY . .
+            # Expose a default port for documentation purposes
+            EXPOSE 5000
+            # Use a generic command to start the app
             CMD ["python", "app.py"]
-            "#
+        "#
         }
         _ => return Err(format!("Unsupported app type: {}", app_type)),
     };
 
-    let dockerfile_path = Path::new(app_path).join("Dockerfile");
     println!("Writing Dockerfile to {}", dockerfile_path.display());
     let mut file = File::create(&dockerfile_path)
         .map_err(|e| format!("Failed to create Dockerfile: {}", e))?;
