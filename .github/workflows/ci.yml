@@ -56,26 +56,12 @@ jobs:
           git checkout gh-pages || git checkout --orphan gh-pages
           git pull origin gh-pages || echo "No updates to pull"
 
-      - name: Compare documentation
-        id: compare-docs
-        run: |
-          # Create a temporary directory for the current documentation
-          mkdir -p temp_docs
-          cp -r target/doc/* temp_docs/
-
-          # Compare the documentation with the existing gh-pages directory using diff
-          if diff -qr temp_docs .; then
-            echo "::set-output name=changed::false"
-          else
-            echo "::set-output name=changed::true"
-          fi
-
-      - name: Deploy documentation if changes exist
-        if: steps.compare-docs.outputs.changed == 'true'
+      - name: Deploy documentation
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          cp -r target/doc/* ./
+          rm -rf ./*
+          cp -r ../target/doc/* ./
           git add .
-          git commit -m "Update documentation" || echo "No changes to commit"
+          git commit -m "Update documentation"
           git push --force "https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" gh-pages
