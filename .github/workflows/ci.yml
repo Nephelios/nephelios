@@ -63,8 +63,8 @@ jobs:
           mkdir -p temp_docs
           cp -r target/doc/* temp_docs/
 
-          # Compare the documentation with the existing gh-pages directory
-          if ! git diff --quiet temp_docs; then
+          # Compare the documentation with the existing gh-pages directory using rsync
+          if rsync -rcn --delete temp_docs/ . | grep -q '^'; then
             echo "::set-output name=changed::true"
           else
             echo "::set-output name=changed::false"
