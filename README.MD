@@ -1,3 +1,8 @@
+# Nephelios: Our Rust-based platform-as-a-service
+Nephelios is platform-as-a-service (PaaS) solution built in Rust, designed to empower developers to effortlessly deploy their applications to the cloud.
+Powerful, simple to use, and easily configurable, our platform streamlines the deployment process while offering robust monitoring functionality to track resource consumption in real-time. 
+With clear configuration options and detailed insights into application performance, our PaaS ensures developers have both control and visibility at every step.
+
 ```
 project/
 ├── src/
