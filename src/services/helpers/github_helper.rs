@@ -41,6 +41,28 @@ pub fn create_temp_dir(app_name: &str) -> Result<PathBuf, String> {
     Ok(temp_dir)
 }
 
+/// Modifies the GitHub URL to include the specified username.
+///
+/// # Arguments
+///
+/// * `github_url` - The original GitHub URL to be modified.
+///
+/// # Returns
+/// * A modified GitHub URL with the username prefixed.
+pub fn modify_github_url(github_url: &str) -> String {
+    let prefix = "https://damien-mathieu1@github.com/";
+    // Remove the existing "https://github.com/" prefix if present
+    if let Some(pos) = github_url.find("https://github.com/") {
+        let modified_url = format!(
+            "{}{}",
+            prefix,
+            &github_url[pos + "https://github.com/".len()..]
+        );
+        return modified_url;
+    }
+    github_url.to_string()
+}
+
 /// Clones a GitHub repository into a specified directory.
 ///
 /// # Arguments
@@ -52,8 +74,10 @@ pub fn create_temp_dir(app_name: &str) -> Result<PathBuf, String> {
 /// * `Ok(())` if the repository was successfully cloned.
 /// * `Err(String)` if there was an error during the cloning process.
 pub fn clone_repo(github_url: &str, target_dir: &str) -> Result<(), String> {
+    let github_url = modify_github_url(github_url);
+
     let status = Command::new("git")
-        .args(["clone", github_url, target_dir])
+        .args(["clone", &github_url, target_dir])
         .status()
         .map_err(|e| format!("Failed to execute git: {}", e))?;
 

@@ -1,4 +1,21 @@
+use warp::reject;
 use warp::Filter;
+
+use crate::services::helpers::docker_helper::{
+    build_image, create_and_run_container, generate_and_write_dockerfile,
+};
+use crate::services::helpers::github_helper::{clone_repo, create_temp_dir, remove_temp_dir};
+
+#[derive(Debug)]
+struct CustomError(String);
+
+impl std::fmt::Display for CustomError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl reject::Reject for CustomError {}
 
 /// Creates the route for app creation.
 ///
@@ -44,7 +61,6 @@ pub fn health_check_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
 ///
 /// A result containing a Warp reply or a Warp rejection.
 async fn handle_create_app(body: serde_json::Value) -> Result<impl warp::Reply, warp::Rejection> {
-    // Extract values safely using Option and Result handling
     let app_name = body
         .get("app_name")
         .and_then(|v| v.as_str())
@@ -62,6 +78,38 @@ async fn handle_create_app(body: serde_json::Value) -> Result<impl warp::Reply, 
                 warp::http::StatusCode::BAD_REQUEST,
             ));
         }
+
+        let directory = create_temp_dir(app_name).map_err(|e| {
+            warp::reject::custom(CustomError(format!(
+                "Failed to create temp directory: {}",
+                e
+            )))
+        })?;
+
+        clone_repo(github_url, directory.to_str().get_or_insert("")).map_err(|e| {
+            warp::reject::custom(CustomError(format!("Failed to clone repository: {}", e)))
+        })?;
+
+        generate_and_write_dockerfile(app_type, directory.to_str().get_or_insert(""))
+            .map_err(|e| warp::reject::custom(CustomError(e)))?;
+
+        build_image(app_name, directory.to_str().get_or_insert("")).map_err(|e| {
+            warp::reject::custom(CustomError(format!("Failed to build Docker image: {}", e)))
+        })?;
+
+        create_and_run_container(app_name).map_err(|e| {
+            warp::reject::custom(CustomError(format!(
+                "Failed to create and run container: {}",
+                e
+            )))
+        })?;
+
+        remove_temp_dir(&directory).map_err(|e| {
+            warp::reject::custom(CustomError(format!(
+                "Failed to remove temp directory: {}",
+                e
+            )))
+        })?;
 
         let string_response = format!(
             "Created app: {} of type: {} with GitHub URL: {}",
