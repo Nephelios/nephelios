@@ -1,10 +1,23 @@
 use warp::reject;
 use warp::Filter;
+use std::process::Command;
+
+
+use crate::traefik::app_service; 
+use crate::traefik::app_service::docker_compose;
+use crate::traefik::app_service::verif_app;
+
+
+// Le reste de votre code routes.rs
 
 use crate::services::helpers::docker_helper::{
     build_image, create_and_run_container, generate_and_write_dockerfile,
 };
 use crate::services::helpers::github_helper::{clone_repo, create_temp_dir, remove_temp_dir};
+use crate::traefik::app_service::add_to_deploy;
+use crate::traefik::app_service::add_to_hosts;
+// use crate::traefik::app_service::add_traefik;
+// use crate::traefik::app_service::create_network;
 
 #[derive(Debug)]
 struct CustomError(String);
@@ -97,12 +110,15 @@ async fn handle_create_app(body: serde_json::Value) -> Result<impl warp::Reply, 
             warp::reject::custom(CustomError(format!("Failed to build Docker image: {}", e)))
         })?;
 
-        create_and_run_container(app_name).map_err(|e| {
-            warp::reject::custom(CustomError(format!(
-                "Failed to create and run container: {}",
-                e
-            )))
-        })?;
+        add_to_hosts(app_name);
+
+        if let Ok(1) = verif_app(app_name) {
+            println!("L'application {} est déjà déployée.", app_name);
+        } 
+        else {
+            add_to_deploy(app_name, "3000");
+            docker_compose();
+        }
 
         remove_temp_dir(&directory).map_err(|e| {
             warp::reject::custom(CustomError(format!(
