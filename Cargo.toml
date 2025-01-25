@@ -9,6 +9,11 @@ uuid = { version = "0.8", features = ["v4"] }
 dirs = "*"
 warp = "*"
 serde_json = "*"
+bollard = "0.12"
+futures-util = "0.3"
+tokio-util = "0.7"
+tar = "0.4"
+walkdir = "2.3"
 
 [[bin]]
 name = "nephelios"

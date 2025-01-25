@@ -1,10 +1,9 @@
-use warp::reject;
-use warp::Filter;
-
 use crate::services::helpers::docker_helper::{
     build_image, create_and_run_container, generate_and_write_dockerfile,
 };
 use crate::services::helpers::github_helper::{clone_repo, create_temp_dir, remove_temp_dir};
+use serde_json::Value;
+use warp::{reject, Filter};
 
 #[derive(Debug)]
 struct CustomError(String);
@@ -29,7 +28,7 @@ impl reject::Reject for CustomError {}
 pub fn create_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     warp::post()
         .and(warp::path("create"))
-        .and(warp::body::json()) // Expect JSON body
+        .and(warp::body::json()) // Expect a JSON body
         .and_then(handle_create_app)
         .boxed()
 }
@@ -50,8 +49,7 @@ pub fn health_check_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
 /// Handles the app creation logic.
 ///
 /// Extracts `app_name`, `app_type`, and `github_url` from the JSON body.
-/// If `github_url` is missing or empty, it returns a 400 Bad Request response.
-/// Otherwise, it returns a 201 Created response indicating the app was created.
+/// Performs cloning, Dockerfile generation, image building, and container creation.
 ///
 /// # Arguments
 ///
@@ -60,70 +58,77 @@ pub fn health_check_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
 /// # Returns
 ///
 /// A result containing a Warp reply or a Warp rejection.
-async fn handle_create_app(body: serde_json::Value) -> Result<impl warp::Reply, warp::Rejection> {
+async fn handle_create_app(body: Value) -> Result<impl warp::Reply, warp::Rejection> {
     let app_name = body
         .get("app_name")
-        .and_then(|v| v.as_str())
+        .and_then(Value::as_str)
         .unwrap_or("default-app");
     let app_type = body
         .get("app_type")
-        .and_then(|v| v.as_str())
+        .and_then(Value::as_str)
         .unwrap_or("nodejs");
-    let github_url = body.get("github_url").and_then(|v| v.as_str());
+    let github_url = body.get("github_url").and_then(Value::as_str);
 
-    if let Some(github_url) = github_url {
-        if github_url.is_empty() {
-            return Ok(warp::reply::with_status(
-                "GitHub URL is required".to_string(),
-                warp::http::StatusCode::BAD_REQUEST,
-            ));
-        }
-
-        let directory = create_temp_dir(app_name).map_err(|e| {
-            warp::reject::custom(CustomError(format!(
-                "Failed to create temp directory: {}",
-                e
-            )))
-        })?;
-
-        clone_repo(github_url, directory.to_str().get_or_insert("")).map_err(|e| {
-            warp::reject::custom(CustomError(format!("Failed to clone repository: {}", e)))
-        })?;
-
-        generate_and_write_dockerfile(app_type, directory.to_str().get_or_insert(""))
-            .map_err(|e| warp::reject::custom(CustomError(e)))?;
-
-        build_image(app_name, directory.to_str().get_or_insert("")).map_err(|e| {
-            warp::reject::custom(CustomError(format!("Failed to build Docker image: {}", e)))
-        })?;
-
-        create_and_run_container(app_name).map_err(|e| {
-            warp::reject::custom(CustomError(format!(
-                "Failed to create and run container: {}",
-                e
-            )))
-        })?;
-
-        remove_temp_dir(&directory).map_err(|e| {
-            warp::reject::custom(CustomError(format!(
-                "Failed to remove temp directory: {}",
-                e
-            )))
-        })?;
-
-        let string_response = format!(
-            "Created app: {} of type: {} with GitHub URL: {}",
-            app_name, app_type, github_url
-        );
-
-        Ok(warp::reply::with_status(
-            string_response,
-            warp::http::StatusCode::CREATED,
-        ))
-    } else {
-        Ok(warp::reply::with_status(
+    if github_url.is_none() || github_url.unwrap().is_empty() {
+        return Ok(warp::reply::with_status(
             "GitHub URL is required".to_string(),
             warp::http::StatusCode::BAD_REQUEST,
-        ))
+        ));
     }
+
+    let github_url = github_url.unwrap();
+    let temp_dir = create_temp_dir(app_name).map_err(|e| {
+        warp::reject::custom(CustomError(format!(
+            "Failed to create temp directory: {}",
+            e
+        )))
+    })?;
+
+    let temp_dir_path = temp_dir.to_str().ok_or_else(|| {
+        warp::reject::custom(CustomError("Temp directory path is invalid".to_string()))
+    })?;
+
+    if let Err(e) = clone_repo(github_url, temp_dir_path) {
+        let _ = remove_temp_dir(&temp_dir);
+        return Err(warp::reject::custom(CustomError(format!(
+            "Failed to clone repository: {}",
+            e
+        ))));
+    }
+
+    if let Err(e) = generate_and_write_dockerfile(app_type, temp_dir_path) {
+        let _ = remove_temp_dir(&temp_dir);
+        return Err(warp::reject::custom(CustomError(format!(
+            "Failed to generate Dockerfile: {}",
+            e
+        ))));
+    }
+
+    if let Err(e) = build_image(app_name, temp_dir_path).await {
+        let _ = remove_temp_dir(&temp_dir);
+        return Err(warp::reject::custom(CustomError(format!(
+            "Failed to build Docker image: {}",
+            e
+        ))));
+    }
+
+    if let Err(e) = create_and_run_container(app_name).await {
+        let _ = remove_temp_dir(&temp_dir);
+        return Err(warp::reject::custom(CustomError(format!(
+            "Failed to create and run container: {}",
+            e
+        ))));
+    }
+
+    if let Err(e) = remove_temp_dir(&temp_dir) {
+        eprintln!("Warning: Failed to clean up temp directory: {}", e);
+    }
+
+    Ok(warp::reply::with_status(
+        format!(
+            "Created app: {} of type: {} with GitHub URL: {}",
+            app_name, app_type, github_url
+        ),
+        warp::http::StatusCode::CREATED,
+    ))
 }
