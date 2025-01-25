@@ -2,6 +2,7 @@ use bollard::container::{
     Config, CreateContainerOptions, RemoveContainerOptions, StartContainerOptions,
 };
 use bollard::image::BuildImageOptions;
+use bollard::models::HostConfigLogConfig;
 use bollard::service::{HostConfig, PortBinding};
 use bollard::Docker;
 use dirs::home_dir;
@@ -93,25 +94,25 @@ pub fn generate_and_write_dockerfile(app_type: &str, app_path: &str) -> Result<(
     let dockerfile_content = match app_type {
         "nodejs" => {
             r#"
-            FROM node:18
-            WORKDIR /app
-            COPY package*.json ./
-            RUN npm install --production
-            COPY . .
-            EXPOSE 3000
-            CMD ["npm", "start"]
-            "#
+        FROM oven/bun:latest
+        WORKDIR /app
+        COPY package.json ./
+        RUN bun install --production
+        COPY . .
+        EXPOSE 3000
+        CMD ["bun", "dev"]
+        "#
         }
         "python" => {
             r#"
-            FROM python:3.8-slim
-            WORKDIR /app
-            COPY requirements.txt ./
-            RUN pip install --no-cache-dir -r requirements.txt
-            COPY . .
-            EXPOSE 5000
-            CMD ["python", "app.py"]
-            "#
+        FROM python:3.8-slim
+        WORKDIR /app
+        COPY requirements.txt ./
+        RUN pip install --no-cache-dir -r requirements.txt
+        COPY . .
+        EXPOSE 5000
+        CMD ["python", "app.py"]
+        "#
         }
         _ => return Err(format!("Unsupported app type: {}", app_type)),
     };
@@ -196,11 +197,21 @@ pub async fn create_and_run_container(app_name: &str) -> Result<(), String> {
         }]),
     );
 
+    let mut log_opts = HashMap::new();
+    log_opts.insert("max-size".to_string(), "10m".to_string());
+    log_opts.insert("max-file".to_string(), "3".to_string());
+
+    let log_config = HostConfigLogConfig {
+        typ: Some("json-file".to_string()), // Log driver type
+        config: Some(log_opts),             // Log options
+    };
+
     let config = Config::<String> {
         image: Some(format!("{}:latest", app_name)),
         exposed_ports: Some(exposed_ports),
         host_config: Some(HostConfig {
             port_bindings: Some(port_bindings),
+            log_config: Some(log_config), // Use HostConfigLogConfig here
             ..Default::default()
         }),
         ..Default::default()
