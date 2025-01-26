@@ -86,34 +86,23 @@ pub fn build_image(app_name: &str, app_path: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Runs a Docker container from the built image using the local Docker CLI.
-///
-/// # Arguments
-///
-/// * `app_name` - The name of the application used for creating the container and identifying the image.
+/// Runs the Docker Compose command to deploy the application.
 ///
 /// # Returns
-/// * `Ok(())` if the container was started successfully.
-/// * `Err(String)` if there was an issue starting the Docker container or invoking the Docker CLI.
-pub fn create_and_run_container(app_name: &str) -> Result<(), String> {
-    let container_name = format!("{}-{}", app_name, uuid::Uuid::new_v4());
+/// * `Ok(())` if the Docker Compose command was successful.
+/// * `Err(String)` if there was an error during execution.
+pub fn docker_compose() -> Result<(), String> {
     let status = Command::new("docker")
-        .args([
-            "run",
-            "-d",
-            "-p",
-            "3000:3000",
-            "--name",
-            &container_name,
-            &format!("{}:latest", app_name),
-        ])
+        .current_dir("src")
+        .arg("compose")
+        .arg("up")
+        .arg("-d")
         .status()
-        .map_err(|e| format!("Failed to invoke Docker CLI: {}", e))?;
+        .map_err(|e| format!("Failed to execute docker compose: {}", e))?;
 
     if !status.success() {
-        return Err("Docker container failed to start. Check image and logs.".to_string());
+        return Err("Docker Compose command failed".to_string());
     }
 
-    println!("Container {} is running.", container_name);
     Ok(())
 }
