@@ -12,6 +12,7 @@ use std::fs;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
+use std::process::Command;
 use tar::Builder;
 use tokio::fs::File as TokioFile;
 use tokio_util::codec::{BytesCodec, FramedRead};
@@ -100,7 +101,7 @@ pub fn generate_and_write_dockerfile(app_type: &str, app_path: &str) -> Result<(
         RUN bun install --production
         COPY . .
         EXPOSE 3000
-        CMD ["bun", "dev"]
+        CMD ["sh", "-c", "if bun dev 2>/dev/null; then bun dev; else bun start; fi"]
         "#
         }
         "python" => {
@@ -171,12 +172,31 @@ pub async fn build_image(app_name: &str, app_path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Runs the Docker Compose command to deploy the application.
 /// Creates and runs a Docker container from the specified image.
 ///
 /// # Arguments
 /// * `app_name` - The name of the Docker image.
 ///
 /// # Returns
+/// * `Ok(())` if the Docker Compose command was successful.
+/// * `Err(String)` if there was an error during execution.
+pub fn start_docker_compose() -> Result<(), String> {
+    let status = Command::new("docker")
+        .current_dir("src")
+        .arg("compose")
+        .arg("up")
+        .arg("-d")
+        .status()
+        .map_err(|e| format!("Failed to execute docker compose: {}", e))?;
+
+    if !status.success() {
+        return Err("Docker Compose command failed".to_string());
+    }
+
+    Ok(())
+}
+
 /// * `Ok(())` if successful.
 /// * `Err(String)` if an error occurs.
 pub async fn create_and_run_container(app_name: &str) -> Result<(), String> {
@@ -232,7 +252,6 @@ pub async fn create_and_run_container(app_name: &str) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to start container: {}", e))?;
 
-    println!("Container {} is running.", container_name);
     Ok(())
 }
 
