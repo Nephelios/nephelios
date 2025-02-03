@@ -1,7 +1,7 @@
 use warp::reject;
 use warp::Filter;
 
-use crate::services::helpers::traefik_helper::{add_to_deploy, add_to_hosts, verif_app};
+use crate::services::helpers::traefik_helper::{add_to_deploy, verif_app};
 
 use crate::services::helpers::docker_helper::{
     build_image, docker_compose, generate_and_write_dockerfile,
@@ -99,15 +99,17 @@ async fn handle_create_app(body: serde_json::Value) -> Result<impl warp::Reply, 
             warp::reject::custom(CustomError(format!("Failed to build Docker image: {}", e)))
         })?;
 
-        add_to_hosts(app_name).map_err(|e| {
-            warp::reject::custom(CustomError(format!(
-                "Failed to add app to hosts file: {}",
-                e
-            )))
-        })?;
-
         if let Ok(1) = verif_app(app_name) {
-            println!("L'application {} est déjà déployée.", app_name);
+            println!(
+                "Application {} already deployed, updating it right now.",
+                app_name
+            );
+            docker_compose().map_err(|e| {
+                warp::reject::custom(CustomError(format!(
+                    "Failed to execute docker compose: {}",
+                    e
+                )))
+            })?;
         } else {
             add_to_deploy(app_name, "3000").map_err(|e| {
                 warp::reject::custom(CustomError(format!(
