@@ -2,6 +2,7 @@ mod routes;
 mod services;
 
 use crate::routes::{create_app_route, health_check_route};
+use std::env;
 use warp::Filter;
 
 /// Entry point for the application.
@@ -27,7 +28,16 @@ use warp::Filter;
 /// ```
 #[tokio::main]
 async fn main() {
+    dotenv::dotenv().ok();
+
+    let app_port: u16 = env::var("APP_PORT")
+        .unwrap_or_else(|_| "3030".to_string())
+        .parse()
+        .unwrap_or(3030);
+
     let api_routes = create_app_route().or(health_check_route());
 
-    warp::serve(api_routes).run(([127, 0, 0, 1], 3030)).await;
+    warp::serve(api_routes)
+        .run(([127, 0, 0, 1], app_port))
+        .await;
 }

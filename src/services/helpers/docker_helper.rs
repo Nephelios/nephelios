@@ -8,6 +8,7 @@ use bollard::Docker;
 use dirs::home_dir;
 use futures_util::stream::StreamExt;
 use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::fs::File;
 use std::io::Write;
@@ -92,28 +93,36 @@ pub fn generate_and_write_dockerfile(app_type: &str, app_path: &str) -> Result<(
         return Ok(());
     }
 
+    let deploy_port: String = env::var("DEPLOY_PORT").unwrap_or_else(|_| "3000".to_string());
+
     let dockerfile_content = match app_type {
         "nodejs" => {
-            r#"
+            format!(
+                r#"
         FROM oven/bun:latest
         WORKDIR /app
         COPY package.json ./
         RUN bun install --production
         COPY . .
-        EXPOSE 3000
+        EXPOSE {}
         CMD ["sh", "-c", "if bun dev 2>/dev/null; then bun dev; else bun start; fi"]
-        "#
+        "#,
+                deploy_port
+            )
         }
         "python" => {
-            r#"
+            format!(
+                r#"
         FROM python:3.8-slim
         WORKDIR /app
         COPY requirements.txt ./
         RUN pip install --no-cache-dir -r requirements.txt
         COPY . .
-        EXPOSE 5000
+        EXPOSE {}
         CMD ["python", "app.py"]
-        "#
+        "#,
+                deploy_port
+            )
         }
         _ => return Err(format!("Unsupported app type: {}", app_type)),
     };
