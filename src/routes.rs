@@ -4,6 +4,7 @@ use crate::services::helpers::docker_helper::{
     build_image, generate_and_write_dockerfile, start_docker_compose,
 };
 use crate::services::helpers::github_helper::{clone_repo, create_temp_dir, remove_temp_dir};
+use serde_json::json;
 use serde_json::Value;
 use warp::{reject, Filter};
 
@@ -73,7 +74,9 @@ async fn handle_create_app(body: Value) -> Result<impl warp::Reply, warp::Reject
 
     if github_url.is_none() || github_url.unwrap().is_empty() {
         return Ok(warp::reply::with_status(
-            "GitHub URL is required".to_string(),
+            warp::reply::json(&json!({
+                "error": "GitHub URL is required"
+            })),
             warp::http::StatusCode::BAD_REQUEST,
         ));
     }
@@ -149,11 +152,16 @@ async fn handle_create_app(body: Value) -> Result<impl warp::Reply, warp::Reject
         eprintln!("Warning: Failed to clean up temp directory: {}", e);
     }
 
+    let response = json!({
+        "message": "Application created successfully",
+        "app_name": app_name,
+        "app_type": app_type,
+        "github_url": github_url,
+        "url": format!("http://{}.localhost", app_name),
+    });
+
     Ok(warp::reply::with_status(
-        format!(
-            "Created app: {} of type: {} with GitHub URL: {}",
-            app_name, app_type, github_url
-        ),
+        warp::reply::json(&response),
         warp::http::StatusCode::CREATED,
     ))
 }
