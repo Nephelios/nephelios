@@ -1,7 +1,7 @@
 use crate::services::helpers::traefik_helper::{add_to_deploy, verif_app};
 
 use crate::services::helpers::docker_helper::{
-    build_image, generate_and_write_dockerfile, start_docker_compose,
+    build_image, generate_and_write_dockerfile, start_docker_compose, AppMetadata,
 };
 use crate::services::helpers::github_helper::{clone_repo, create_temp_dir, remove_temp_dir};
 use serde_json::json;
@@ -82,6 +82,12 @@ async fn handle_create_app(body: Value) -> Result<impl warp::Reply, warp::Reject
     }
 
     let github_url = github_url.unwrap();
+    let metadata = AppMetadata::new(
+        app_name.to_string(),
+        app_type.to_string(),
+        github_url.to_string(),
+    );
+
     let temp_dir = create_temp_dir(app_name).map_err(|e| {
         warp::reject::custom(CustomError(format!(
             "Failed to create temp directory: {}",
@@ -101,7 +107,7 @@ async fn handle_create_app(body: Value) -> Result<impl warp::Reply, warp::Reject
         ))));
     }
 
-    if let Err(e) = generate_and_write_dockerfile(app_type, temp_dir_path) {
+    if let Err(e) = generate_and_write_dockerfile(app_type, temp_dir_path, &metadata) {
         let _ = remove_temp_dir(&temp_dir);
         return Err(warp::reject::custom(CustomError(format!(
             "Failed to generate Dockerfile: {}",
@@ -109,7 +115,7 @@ async fn handle_create_app(body: Value) -> Result<impl warp::Reply, warp::Reject
         ))));
     }
 
-    if let Err(e) = build_image(app_name, temp_dir_path).await {
+    if let Err(e) = build_image(app_name, temp_dir_path, &metadata).await {
         let _ = remove_temp_dir(&temp_dir);
         return Err(warp::reject::custom(CustomError(format!(
             "Failed to build Docker image: {}",
@@ -158,6 +164,10 @@ async fn handle_create_app(body: Value) -> Result<impl warp::Reply, warp::Reject
         "app_type": app_type,
         "github_url": github_url,
         "url": format!("http://{}.localhost", app_name),
+        "metadata": {
+            "created_at": metadata.created_at,
+            "domain": metadata.domain,
+        }
     });
 
     Ok(warp::reply::with_status(

@@ -5,6 +5,7 @@ use bollard::image::BuildImageOptions;
 use bollard::models::HostConfigLogConfig;
 use bollard::service::{HostConfig, PortBinding};
 use bollard::Docker;
+use chrono::Utc;
 use dirs::home_dir;
 use futures_util::stream::StreamExt;
 use std::collections::HashMap;
@@ -20,6 +21,41 @@ use tokio_util::codec::{BytesCodec, FramedRead};
 use uuid::Uuid;
 use walkdir::WalkDir;
 use warp::hyper::Body;
+
+#[derive(Debug, Clone)]
+pub struct AppMetadata {
+    pub app_name: String,
+    pub app_type: String,
+    pub github_url: String,
+    pub domain: String,
+    pub created_at: String,
+}
+
+impl AppMetadata {
+    pub fn new(app_name: String, app_type: String, github_url: String) -> Self {
+        Self {
+            app_name: app_name.clone(),
+            app_type,
+            github_url,
+            domain: format!("{}.localhost", app_name),
+            created_at: Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Converts the metadata to a HashMap of labels for Docker.
+    ///
+    /// # Returns
+    /// A HashMap with string slices as keys and values.
+    fn to_labels(&self) -> HashMap<&str, &str> {
+        let mut labels = HashMap::new();
+        labels.insert("com.myapp.name", self.app_name.as_str());
+        labels.insert("com.myapp.type", self.app_type.as_str());
+        labels.insert("com.myapp.github_url", self.github_url.as_str());
+        labels.insert("com.myapp.domain", self.domain.as_str());
+        labels.insert("com.myapp.created_at", self.created_at.as_str());
+        labels
+    }
+}
 
 /// Creates a Docker context tarball for the specified application path.
 ///
@@ -85,7 +121,11 @@ fn create_docker_context(app_path: &str) -> Result<String, String> {
 /// # Returns
 /// * `Ok(())` if successful.
 /// * `Err(String)` if an error occurs.
-pub fn generate_and_write_dockerfile(app_type: &str, app_path: &str) -> Result<(), String> {
+pub fn generate_and_write_dockerfile(
+    app_type: &str,
+    app_path: &str,
+    metadata: &AppMetadata,
+) -> Result<(), String> {
     let dockerfile_path = Path::new(app_path).join("Dockerfile");
 
     if dockerfile_path.exists() {
@@ -95,33 +135,38 @@ pub fn generate_and_write_dockerfile(app_type: &str, app_path: &str) -> Result<(
 
     let deploy_port: String = env::var("DEPLOY_PORT").unwrap_or_else(|_| "3000".to_string());
 
+    let labels = metadata
+        .to_labels()
+        .iter()
+        .map(|(k, v)| format!("LABEL {}=\"{}\"", k, v))
+        .collect::<Vec<_>>()
+        .join("\n");
+
     let dockerfile_content = match app_type {
         "nodejs" => {
             format!(
-                r#"
-        FROM oven/bun:latest
-        WORKDIR /app
-        COPY package.json ./
-        RUN bun install --production
-        COPY . .
-        EXPOSE {}
-        CMD ["sh", "-c", "if bun dev 2>/dev/null; then bun dev; else bun start; fi"]
-        "#,
-                deploy_port
+                r#"FROM oven/bun:latest
+WORKDIR /app
+{}
+COPY package.json ./
+RUN bun install --production
+COPY . .
+EXPOSE {}
+CMD ["sh", "-c", "if bun dev 2>/dev/null; then bun dev; else bun start; fi"]"#,
+                labels, deploy_port
             )
         }
         "python" => {
             format!(
-                r#"
-        FROM python:3.8-slim
-        WORKDIR /app
-        COPY requirements.txt ./
-        RUN pip install --no-cache-dir -r requirements.txt
-        COPY . .
-        EXPOSE {}
-        CMD ["python", "app.py"]
-        "#,
-                deploy_port
+                r#"FROM python:3.8-slim
+WORKDIR /app
+{}
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE {}
+CMD ["python", "app.py"]"#,
+                labels, deploy_port
             )
         }
         _ => return Err(format!("Unsupported app type: {}", app_type)),
@@ -144,7 +189,11 @@ pub fn generate_and_write_dockerfile(app_type: &str, app_path: &str) -> Result<(
 /// # Returns
 /// * `Ok(())` if successful.
 /// * `Err(String)` if there is an error.
-pub async fn build_image(app_name: &str, app_path: &str) -> Result<(), String> {
+pub async fn build_image(
+    app_name: &str,
+    app_path: &str,
+    metadata: &AppMetadata,
+) -> Result<(), String> {
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
 
@@ -160,6 +209,7 @@ pub async fn build_image(app_name: &str, app_path: &str) -> Result<(), String> {
     let options = BuildImageOptions {
         t: app_name,
         rm: true,
+        labels: metadata.to_labels(),
         ..Default::default()
     };
 
