@@ -1,3 +1,4 @@
+use bollard::container::ListContainersOptions;
 use bollard::container::{
     Config, CreateContainerOptions, RemoveContainerOptions, StartContainerOptions,
 };
@@ -8,6 +9,7 @@ use bollard::Docker;
 use chrono::Utc;
 use dirs::home_dir;
 use futures_util::stream::StreamExt;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -20,6 +22,7 @@ use tokio::fs::File as TokioFile;
 use tokio_util::codec::{BytesCodec, FramedRead};
 use uuid::Uuid;
 use walkdir::WalkDir;
+use warp::hyper::body::to_bytes;
 use warp::hyper::Body;
 
 #[derive(Debug, Clone)]
@@ -55,6 +58,80 @@ impl AppMetadata {
         labels.insert("com.myapp.created_at", self.created_at.as_str());
         labels
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AppInfo {
+    pub app_name: String,
+    pub app_type: String,
+    pub github_url: String,
+    pub domain: String,
+    pub created_at: String,
+    pub status: String,
+    #[serde(default)]
+    pub container_id: Option<String>,
+}
+
+pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
+    let docker = Docker::connect_with_local_defaults()
+        .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
+
+    let container_filters: HashMap<String, Vec<String>> = HashMap::new();
+    let container_options = ListContainersOptions {
+        all: true,
+        filters: container_filters,
+        ..Default::default()
+    };
+
+    let containers = docker
+        .list_containers(Some(container_options))
+        .await
+        .map_err(|e| format!("Failed to list containers: {}", e))?;
+
+    let mut apps = Vec::new();
+
+    // Iterate over containers and check for custom labels
+    for container in containers {
+        if let Some(labels) = container.labels {
+            if let (Some(name), Some(app_type), Some(url), Some(domain), Some(created)) = (
+                labels.get("com.myapp.name"),
+                labels.get("com.myapp.type"),
+                labels.get("com.myapp.github_url"),
+                labels.get("com.myapp.domain"),
+                labels.get("com.myapp.created_at"),
+            ) {
+                // Get container's state/status
+                let status = match container.state {
+                    Some(ref state) => state.clone(),
+                    None => container
+                        .status
+                        .clone()
+                        .unwrap_or_else(|| "unknown".to_string()),
+                };
+
+                // Collect app info, handle Option<String> for container.id
+                apps.push(AppInfo {
+                    app_name: name.clone(),
+                    app_type: app_type.clone(),
+                    github_url: url.clone(),
+                    domain: domain.clone(),
+                    created_at: created.clone(),
+                    status,
+                    container_id: Some(
+                        container
+                            .id
+                            .clone()
+                            .unwrap_or_else(|| "unknown".to_string()),
+                    ),
+                });
+            }
+        }
+    }
+
+    // Sort by creation date, newest first
+    apps.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    Ok(apps)
 }
 
 /// Creates a Docker context tarball for the specified application path.
@@ -206,6 +283,10 @@ pub async fn build_image(
         FramedRead::new(tar_file, BytesCodec::new()).map(|res| res.map(|b| b.freeze()));
     let body = Body::wrap_stream(tar_stream);
 
+    let body_bytes = to_bytes(body)
+        .await
+        .map_err(|e| format!("Failed to convert Body to Bytes: {}", e))?;
+
     let options = BuildImageOptions {
         t: app_name,
         rm: true,
@@ -213,7 +294,7 @@ pub async fn build_image(
         ..Default::default()
     };
 
-    let mut build_stream = docker.build_image(options, None, Some(body));
+    let mut build_stream = docker.build_image(options, None, Some(body_bytes));
 
     while let Some(log) = build_stream.next().await {
         match log {
@@ -300,6 +381,7 @@ pub async fn create_and_run_container(app_name: &str) -> Result<(), String> {
         .create_container(
             Some(CreateContainerOptions {
                 name: &container_name,
+                platform: Some(&"linux/amd64".to_string()),
             }),
             config,
         )
