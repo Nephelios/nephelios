@@ -1,7 +1,16 @@
 use std::fs::File;
+use std::fs;
 use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
+
+
+
+
+// pub fn remove_app_compose(app: &str) -> io::Result<>{
+
+//     Ok(());
+// }
 
 /// Verifies if the application is already deployed.
 ///
@@ -68,4 +77,38 @@ pub fn add_to_deploy(app: &str, port: &str) -> io::Result<()> {
     println!("Contenu ajouté");
 
     Ok(())
+}
+
+
+
+pub fn remove_app_compose(app_name: &str) -> io::Result<()> {
+    let path = PathBuf::from("src/docker-compose.yml");
+    let content = fs::read_to_string(&path)?;
+
+
+    let mut new_content = String::new();
+    let mut in_service = false;
+
+    for line in content.lines() {
+        if line.starts_with("  ") && in_service {
+            continue;
+        }
+        if line.starts_with(&format!("  {}:", app_name)) {
+            in_service = true;
+            continue;
+        }
+        if line.starts_with("  ") == false {
+            in_service = false;
+        }
+        if !in_service {
+            new_content.push_str(line);
+            new_content.push('\n');
+        }
+    }
+    
+    let mut file = fs::File::create(&path)?;
+    file.write_all(new_content.as_bytes())?;
+    
+    Ok(())
+
 }

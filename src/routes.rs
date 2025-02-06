@@ -1,8 +1,11 @@
 use crate::services::helpers::traefik_helper::{add_to_deploy, verif_app};
 
 use crate::services::helpers::docker_helper::{
-    build_image, generate_and_write_dockerfile, start_docker_compose,
+    build_image, generate_and_write_dockerfile, remove_container, stop_container, start_docker_compose
 };
+
+use crate::services::helpers::traefik_helper::remove_app_compose;
+
 use crate::services::helpers::github_helper::{clone_repo, create_temp_dir, remove_temp_dir};
 use serde_json::Value;
 use warp::{reject, Filter};
@@ -35,6 +38,14 @@ pub fn create_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
         .boxed()
 }
 
+pub fn remove_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
+    warp::post()
+    .and(warp::path("remove"))
+    .and(warp::body::json()) // Expect a JSON body
+    .and_then(handle_remove_app)
+    .boxed()
+}
+
 /// Creates the route for health checks.
 ///
 /// This route listens for GET requests at the `/health` path.
@@ -47,6 +58,30 @@ pub fn health_check_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
         .map(|| warp::reply::json(&"OK"))
         .boxed()
 }
+
+
+async fn handle_remove_app(body: Value) -> Result<impl warp::Reply, warp::Rejection> {
+    let app_name = body
+        .get("app_name")
+        .and_then(Value::as_str)
+        .unwrap_or("default-app");
+
+    stop_container(app_name).await;
+    remove_container(app_name).await;
+    remove_app_compose(app_name);
+
+    Ok(warp::reply::with_status(
+        format!("Remove app: {}.", app_name),
+        warp::http::StatusCode::CREATED,
+        ))
+} 
+
+    // Ok(warp::reply::with_status(
+    //     format!("Remove app: {}.", app_name),
+    //     warp::http::StatusCode::CREATED,
+    // ))
+
+
 
 /// Handles the app creation logic.
 ///

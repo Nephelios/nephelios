@@ -272,21 +272,43 @@ pub async fn create_and_run_container(app_name: &str) -> Result<(), String> {
 /// # Returns
 /// * `Ok(())` if successful.
 /// * `Err(String)` if an error occurs.
-pub async fn remove_container(container_name: &str) -> Result<(), String> {
-    let docker = Docker::connect_with_local_defaults()
-        .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
+// pub async fn remove_container(container_name: &str) -> Result<(), String> {
+//     let docker = Docker::connect_with_local_defaults()
+//         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
 
-    docker
-        .remove_container(
-            container_name,
-            Some(RemoveContainerOptions {
-                force: true,
-                ..Default::default()
-            }),
-        )
-        .await
-        .map_err(|e| format!("Failed to remove container {}: {}", container_name, e))?;
+//     docker
+//         .remove_container(
+//             container_name,
+//             Some(RemoveContainerOptions {
+//                 force: true,
+//                 ..Default::default()
+//             }),
+//         )
+//         .await
+//         .map_err(|e| format!("Failed to remove container {}: {}", container_name, e))?;
 
-    println!("Container {} removed successfully.", container_name);
+//     println!("Container {} removed successfully.", container_name);
+//     Ok(())
+// }
+
+
+
+
+pub async fn stop_container(container_name: &str) -> Result<(), String> {
+
+    let output = Command::new("docker")
+    .args(&["stop", container_name])
+    .output()
+    .map_err(|e| format!("Failed to execute docker stop: {}", e))?;
     Ok(())
-}
+ }
+
+
+pub async fn remove_container(container_name: &str) -> Result<(), String> {
+    
+    let output = Command::new("docker")
+    .args(&["rm", container_name])
+    .output()
+    .map_err(|e| format!("Failed to execute docker stop: {}", e))?;
+    Ok(())
+ }
