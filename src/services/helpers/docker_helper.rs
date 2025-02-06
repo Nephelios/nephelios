@@ -210,7 +210,8 @@ pub fn generate_and_write_dockerfile(
         return Ok(());
     }
 
-    let deploy_port: String = env::var("DEPLOY_PORT").unwrap_or_else(|_| "3000".to_string());
+    let deploy_port: String =
+        env::var("NEPHELIOS_APPS_PORT").unwrap_or_else(|_| "3000".to_string());
 
     let labels = metadata
         .to_labels()
@@ -377,11 +378,13 @@ pub async fn create_and_run_container(app_name: &str) -> Result<(), String> {
         ..Default::default()
     };
 
+    let platform_variable: String = "linux/amd64".to_string(); // Example variable
+
     docker
         .create_container(
             Some(CreateContainerOptions {
                 name: &container_name,
-                platform: Some(&"linux/amd64".to_string()),
+                platform: Some(platform_variable), // Wrap in Some to convert String to Option<String>
             }),
             config,
         )

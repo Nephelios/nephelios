@@ -31,7 +31,7 @@ use warp::Filter;
 async fn main() {
     dotenv::dotenv().ok();
 
-    let app_port: u16 = env::var("APP_PORT")
+    let app_port: u16 = env::var("NEPHELIOS_PORT")
         .unwrap_or_else(|_| "3030".to_string())
         .parse()
         .unwrap_or(3030);
