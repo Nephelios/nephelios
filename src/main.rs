@@ -2,6 +2,7 @@ mod routes;
 mod services;
 
 use crate::routes::{create_app_route, health_check_route};
+use routes::get_apps_route;
 use std::env;
 use warp::Filter;
 
@@ -35,7 +36,9 @@ async fn main() {
         .parse()
         .unwrap_or(3030);
 
-    let api_routes = create_app_route().or(health_check_route());
+    let api_routes = create_app_route()
+        .or(health_check_route())
+        .or(get_apps_route());
 
     warp::serve(api_routes)
         .run(([127, 0, 0, 1], app_port))

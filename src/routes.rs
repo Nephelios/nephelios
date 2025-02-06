@@ -1,7 +1,8 @@
 use crate::services::helpers::traefik_helper::{add_to_deploy, verif_app};
 
 use crate::services::helpers::docker_helper::{
-    build_image, generate_and_write_dockerfile, start_docker_compose, AppMetadata,
+    build_image, generate_and_write_dockerfile, list_deployed_apps, start_docker_compose,
+    AppMetadata,
 };
 use crate::services::helpers::github_helper::{clone_repo, create_temp_dir, remove_temp_dir};
 use serde_json::json;
@@ -49,6 +50,38 @@ pub fn health_check_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
         .boxed()
 }
 
+pub fn get_apps_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
+    warp::get()
+        .and(warp::path("get-apps"))
+        .and_then(handle_get_apps)
+        .boxed()
+}
+
+pub async fn handle_get_apps() -> Result<impl warp::Reply, warp::Rejection> {
+    match list_deployed_apps().await {
+        Ok(apps) => {
+            let response = json!({
+                "status": "success",
+                "apps": apps,
+                "total": apps.len(),
+            });
+            Ok(warp::reply::with_status(
+                warp::reply::json(&response),
+                warp::http::StatusCode::OK,
+            ))
+        }
+        Err(e) => {
+            let response = json!({
+                "status": "error",
+                "message": format!("Failed to list apps: {}", e)
+            });
+            Ok(warp::reply::with_status(
+                warp::reply::json(&response),
+                warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+        }
+    }
+}
 /// Handles the app creation logic.
 ///
 /// Extracts `app_name`, `app_type`, and `github_url` from the JSON body.
