@@ -378,13 +378,11 @@ pub async fn create_and_run_container(app_name: &str) -> Result<(), String> {
         ..Default::default()
     };
 
-    let platform_variable: String = "linux/amd64".to_string(); // Example variable
-
     docker
         .create_container(
             Some(CreateContainerOptions {
                 name: &container_name,
-                platform: Some(platform_variable), // Wrap in Some to convert String to Option<String>
+                platform: Some(&"linux/amd64".to_string()),
             }),
             config,
         )
