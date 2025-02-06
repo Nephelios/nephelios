@@ -4,6 +4,7 @@ mod services;
 use crate::routes::{create_app_route, health_check_route};
 use routes::get_apps_route;
 use std::env;
+use warp::http::Method;
 use warp::Filter;
 
 /// Entry point for the application.
@@ -36,9 +37,17 @@ async fn main() {
         .parse()
         .unwrap_or(3030);
 
+    let cors = warp::cors()
+        .allow_any_origin()
+        .allow_methods(&[Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers(vec!["Content-Type"]);
+
     let api_routes = create_app_route()
         .or(health_check_route())
-        .or(get_apps_route());
+        .or(get_apps_route())
+        .with(cors);
+
+    println!("🚀 Server running on http://127.0.0.1:{}", app_port);
 
     warp::serve(api_routes)
         .run(([127, 0, 0, 1], app_port))

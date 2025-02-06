@@ -48,14 +48,14 @@ impl AppMetadata {
     /// Converts the metadata to a HashMap of labels for Docker.
     ///
     /// # Returns
-    /// A HashMap with string slices as keys and values.
-    fn to_labels(&self) -> HashMap<&str, &str> {
+    /// A HashMap with String keys and values.
+    fn to_labels(&self) -> HashMap<String, String> {
         let mut labels = HashMap::new();
-        labels.insert("com.myapp.name", self.app_name.as_str());
-        labels.insert("com.myapp.type", self.app_type.as_str());
-        labels.insert("com.myapp.github_url", self.github_url.as_str());
-        labels.insert("com.myapp.domain", self.domain.as_str());
-        labels.insert("com.myapp.created_at", self.created_at.as_str());
+        labels.insert("com.myapp.name".to_string(), self.app_name.clone());
+        labels.insert("com.myapp.type".to_string(), self.app_type.clone());
+        labels.insert("com.myapp.github_url".to_string(), self.github_url.clone());
+        labels.insert("com.myapp.domain".to_string(), self.domain.clone());
+        labels.insert("com.myapp.created_at".to_string(), self.created_at.clone());
         labels
     }
 }
@@ -289,7 +289,7 @@ pub async fn build_image(
         .map_err(|e| format!("Failed to convert Body to Bytes: {}", e))?;
 
     let options = BuildImageOptions {
-        t: app_name,
+        t: app_name.to_lowercase(),
         rm: true,
         labels: metadata.to_labels(),
         ..Default::default()
