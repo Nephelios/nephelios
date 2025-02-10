@@ -2,8 +2,10 @@ mod routes;
 mod services;
 
 use crate::routes::{create_app_route, health_check_route};
+use crate::services::websocket::ws_route;
 use routes::get_apps_route;
 use std::env;
+use tokio::sync::broadcast;
 use warp::http::Method;
 use warp::Filter;
 
@@ -42,9 +44,12 @@ async fn main() {
         .allow_methods(&[Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers(vec!["Content-Type"]);
 
-    let api_routes = create_app_route()
+    let (status_tx, status_rx) = broadcast::channel(32);
+
+    let api_routes = create_app_route(status_tx.clone())
         .or(health_check_route())
         .or(get_apps_route())
+        .or(ws_route(status_rx))
         .with(cors);
 
     println!("🚀 Server running on http://127.0.0.1:{}", app_port);
