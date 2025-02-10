@@ -38,6 +38,16 @@ pub fn create_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
         .boxed()
 }
 
+
+
+/// Creates the route for app removal.
+///
+/// This route listens for POST requests at the `/remove` path and expects a JSON body.
+/// The JSON body should contain the following key:
+/// - `app_name`: The name of the application (default: "default-app").
+///
+/// Returns a boxed Warp filter that handles app removal requests.
+
 pub fn remove_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     warp::post()
     .and(warp::path("remove"))
@@ -52,6 +62,7 @@ pub fn remove_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
 /// It is used to verify the server's status and returns a JSON response "OK".
 ///
 /// Returns a boxed Warp filter that handles health check requests.
+
 pub fn health_check_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     warp::get()
         .and(warp::path("health"))
@@ -60,6 +71,19 @@ pub fn health_check_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
 }
 
 
+/// Handles the app removal logic.
+///
+/// Extracts `app_name` from the JSON body and performs the necessary steps to remove the app:
+/// stopping the running container, removing the container, and deleting the associated compose file.
+///
+/// # Arguments
+///
+/// * `body` - The JSON body received in the request, expected to contain `app_name`.
+///
+/// # Returns
+///
+/// A result containing a Warp reply or a Warp rejection.
+
 async fn handle_remove_app(body: Value) -> Result<impl warp::Reply, warp::Rejection> {
     let app_name = body
         .get("app_name")
@@ -67,7 +91,9 @@ async fn handle_remove_app(body: Value) -> Result<impl warp::Reply, warp::Reject
         .unwrap_or("default-app");
 
     stop_container(app_name).await;
+
     remove_container(app_name).await;
+
     remove_app_compose(app_name);
 
     Ok(warp::reply::with_status(
@@ -75,11 +101,6 @@ async fn handle_remove_app(body: Value) -> Result<impl warp::Reply, warp::Reject
         warp::http::StatusCode::CREATED,
         ))
 } 
-
-    // Ok(warp::reply::with_status(
-    //     format!("Remove app: {}.", app_name),
-    //     warp::http::StatusCode::CREATED,
-    // ))
 
 
 

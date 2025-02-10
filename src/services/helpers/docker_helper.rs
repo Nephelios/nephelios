@@ -264,35 +264,18 @@ pub async fn create_and_run_container(app_name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Removes a Docker container.
+
+/// Stops the running container for the given application.
+///
+/// Executes the `docker stop` command to stop the container with the given name.
 ///
 /// # Arguments
-/// * `container_name` - The name of the container to remove.
+///
+/// * `container_name` - The name of the container to stop.
 ///
 /// # Returns
-/// * `Ok(())` if successful.
-/// * `Err(String)` if an error occurs.
-// pub async fn remove_container(container_name: &str) -> Result<(), String> {
-//     let docker = Docker::connect_with_local_defaults()
-//         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
-
-//     docker
-//         .remove_container(
-//             container_name,
-//             Some(RemoveContainerOptions {
-//                 force: true,
-//                 ..Default::default()
-//             }),
-//         )
-//         .await
-//         .map_err(|e| format!("Failed to remove container {}: {}", container_name, e))?;
-
-//     println!("Container {} removed successfully.", container_name);
-//     Ok(())
-// }
-
-
-
+///
+/// A `Result` indicating success or an error message in case of failure.
 
 pub async fn stop_container(container_name: &str) -> Result<(), String> {
 
@@ -303,6 +286,18 @@ pub async fn stop_container(container_name: &str) -> Result<(), String> {
     Ok(())
  }
 
+
+/// Removes the container for the given application.
+///
+/// Executes the `docker rm` command to remove the container with the given name.
+///
+/// # Arguments
+///
+/// * `container_name` - The name of the container to remove.
+///
+/// # Returns
+///
+/// A `Result` indicating success or an error message in case of failure.
 
 pub async fn remove_container(container_name: &str) -> Result<(), String> {
     

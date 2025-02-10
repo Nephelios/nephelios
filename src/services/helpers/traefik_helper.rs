@@ -80,6 +80,18 @@ pub fn add_to_deploy(app: &str, port: &str) -> io::Result<()> {
 }
 
 
+/// Removes the docker-compose configuration for the given application.
+///
+/// Reads the `docker-compose.yml` file, removes the section corresponding to `app_name`,
+/// and writes the updated content back to the file.
+///
+/// # Arguments
+///
+/// * `app_name` - The name of the application to remove from the compose file.
+///
+/// # Returns
+///
+/// A `Result` indicating success or an I/O error.
 
 pub fn remove_app_compose(app_name: &str) -> io::Result<()> {
     let path = PathBuf::from("src/docker-compose.yml");
