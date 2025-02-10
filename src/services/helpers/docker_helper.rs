@@ -291,9 +291,6 @@ pub async fn create_and_run_container(app_name: &str) -> Result<(), String> {
 //     Ok(())
 // }
 
-
-
-
 pub async fn stop_container(container_name: &str) -> Result<(), String> {
 
     let output = Command::new("docker")

@@ -46,6 +46,22 @@ pub fn remove_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     .boxed()
 }
 
+pub fn stop_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
+    warp::post()
+    .and(warp::path("stop"))
+    .and(warp::body::json()) // Expect a JSON body
+    .and_then(handle_stop_app)
+    .boxed()
+}
+
+pub fn start_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
+    warp::post()
+    .and(warp::path("start"))
+    .and(warp::body::json()) // Expect a JSON body
+    .and_then(handle_start_app)
+    .boxed()
+}
+
 /// Creates the route for health checks.
 ///
 /// This route listens for GET requests at the `/health` path.
@@ -59,6 +75,42 @@ pub fn health_check_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
         .boxed()
 }
 
+
+async fn handle_start_app(body: Value) -> Result<impl warp::Reply, warp::Rejection>{
+
+    let app_name = body
+        .get("app_name")
+        .and_then(Value::as_str)
+        .unwrap_or("default-app");
+
+    add_to_deploy(app_name,"3000");
+
+    start_docker_compose();
+
+    Ok(warp::reply::with_status(
+        format!("start app: {}.", app_name),
+        warp::http::StatusCode::CREATED,
+        ))
+
+}
+
+async fn handle_stop_app(body: Value) -> Result<impl warp::Reply, warp::Rejection> {
+
+    let app_name = body
+        .get("app_name")
+        .and_then(Value::as_str)
+        .unwrap_or("default-app");
+
+    stop_container(app_name).await;
+
+    remove_app_compose(app_name);
+
+    Ok(warp::reply::with_status(
+        format!("stop app: {}.", app_name),
+        warp::http::StatusCode::CREATED,
+        ))
+
+}
 
 async fn handle_remove_app(body: Value) -> Result<impl warp::Reply, warp::Rejection> {
     let app_name = body
