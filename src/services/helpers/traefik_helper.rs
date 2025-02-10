@@ -6,12 +6,6 @@ use std::path::PathBuf;
 
 
 
-
-// pub fn remove_app_compose(app: &str) -> io::Result<>{
-
-//     Ok(());
-// }
-
 /// Verifies if the application is already deployed.
 ///
 /// # Arguments
