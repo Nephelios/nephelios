@@ -1,9 +1,12 @@
 use crate::services::helpers::traefik_helper::{add_to_deploy, verif_app};
 
 use crate::services::helpers::docker_helper::{
-    build_image, generate_and_write_dockerfile, list_deployed_apps, start_docker_compose,
-    AppMetadata,
+    build_image, generate_and_write_dockerfile, list_deployed_apps, remove_container,
+    start_docker_compose, stop_container, AppMetadata,
 };
+
+use crate::services::helpers::traefik_helper::remove_app_compose;
+
 use crate::services::helpers::github_helper::{clone_repo, create_temp_dir, remove_temp_dir};
 use crate::services::websocket::{send_deployment_status, StatusSender};
 use serde_json::json;
@@ -41,17 +44,80 @@ pub fn create_app_route(
         .boxed()
 }
 
+/// Creates the route for app removal.
+///
+/// This route listens for POST requests at the `/remove` path and expects a JSON body.
+/// The JSON body should contain the following key:
+/// - `app_name`: The name of the application (default: "default-app").
+///
+/// Returns a boxed Warp filter that handles app removal requests.
+
+pub fn remove_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
+    warp::post()
+        .and(warp::path("remove"))
+        .and(warp::body::json()) // Expect a JSON body
+        .and_then(handle_remove_app)
+        .boxed()
+}
+
 /// Creates the route for health checks.
 ///
 /// This route listens for GET requests at the `/health` path.
 /// It is used to verify the server's status and returns a JSON response "OK".
 ///
 /// Returns a boxed Warp filter that handles health check requests.
+
 pub fn health_check_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     warp::get()
         .and(warp::path("health"))
         .map(|| warp::reply::json(&"OK"))
         .boxed()
+}
+
+/// Handles the app removal logic.
+///
+/// Extracts `app_name` from the JSON body and performs the necessary steps to remove the app:
+/// stopping the running container, removing the container, and deleting the associated compose file.
+///
+/// # Arguments
+///
+/// * `body` - The JSON body received in the request, expected to contain `app_name`.
+///
+/// # Returns
+///
+/// A result containing a Warp reply or a Warp rejection.
+
+async fn handle_remove_app(body: Value) -> Result<impl warp::Reply, warp::Rejection> {
+    let app_name = body
+        .get("app_name")
+        .and_then(Value::as_str)
+        .unwrap_or("default-app");
+
+    let _ = stop_container(app_name).await.map_err(|e| {
+        warp::reject::custom(CustomError(format!(
+            "Failed to stop container for app {}: {}",
+            app_name, e
+        )))
+    })?;
+
+    let _ = remove_container(app_name).await.map_err(|e| {
+        warp::reject::custom(CustomError(format!(
+            "Failed to remove container for app {}: {}",
+            app_name, e
+        )))
+    })?;
+
+    let _ = remove_app_compose(app_name).map_err(|e| {
+        warp::reject::custom(CustomError(format!(
+            "Failed to remove app compose file for app {}: {}",
+            app_name, e
+        )))
+    })?;
+
+    Ok(warp::reply::with_status(
+        format!("Remove app: {}.", app_name),
+        warp::http::StatusCode::CREATED,
+    ))
 }
 
 pub fn get_apps_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
@@ -86,6 +152,7 @@ pub async fn handle_get_apps() -> Result<impl warp::Reply, warp::Rejection> {
         }
     }
 }
+
 /// Handles the app creation logic.
 ///
 /// Extracts `app_name`, `app_type`, and `github_url` from the JSON body.
