@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["handle_ws_connection","send_deployment_status","ws_route"],"struct":["DeploymentStatus"],"type":["StatusSender"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["build_image","create_docker_context","generate_and_write_dockerfile","list_deployed_apps","remove_container","start_docker_compose","stop_container"],"struct":["AppInfo","AppMetadata"]};
