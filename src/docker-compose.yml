@@ -21,19 +21,3 @@ services:
       - "traefik.http.services.traefik.loadbalancer.server.port=8080"
     networks:
       - traefik-global-proxy
-      
-    
-
-  landy:
-    image: landy:latest
-    container_name: landy
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.landy.rule=Host(`landy.localhost`)"
-      - "traefik.http.routers.landy.entryPoints=websecure"
-      - "traefik.http.routers.landy.tls=true"
-      - "traefik.http.services.landy.loadbalancer.server.port=3000"
-    networks:
-      - traefik-global-proxy
-     
-    
