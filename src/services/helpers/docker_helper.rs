@@ -1,10 +1,6 @@
-use bollard::container::ListContainersOptions;
-use bollard::container::{
-    Config, CreateContainerOptions, RemoveContainerOptions, StartContainerOptions,
-};
+use bollard::container::RemoveContainerOptions;
+use bollard::container::{ListContainersOptions, StopContainerOptions};
 use bollard::image::BuildImageOptions;
-use bollard::models::HostConfigLogConfig;
-use bollard::service::{HostConfig, PortBinding};
 use bollard::Docker;
 use chrono::Utc;
 use dirs::home_dir;
@@ -20,7 +16,6 @@ use std::process::Command;
 use tar::Builder;
 use tokio::fs::File as TokioFile;
 use tokio_util::codec::{BytesCodec, FramedRead};
-use uuid::Uuid;
 use walkdir::WalkDir;
 use warp::hyper::body::to_bytes;
 use warp::hyper::Body;
@@ -338,66 +333,6 @@ pub fn start_docker_compose() -> Result<(), String> {
     Ok(())
 }
 
-/// * `Ok(())` if successful.
-/// * `Err(String)` if an error occurs.
-pub async fn create_and_run_container(app_name: &str) -> Result<(), String> {
-    let docker = Docker::connect_with_local_defaults()
-        .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
-
-    let container_name = format!("{}-{}", app_name, Uuid::new_v4());
-
-    let mut exposed_ports = HashMap::new();
-    exposed_ports.insert("3000/tcp".to_string(), HashMap::new());
-
-    let mut port_bindings = HashMap::new();
-    port_bindings.insert(
-        "3000/tcp".to_string(),
-        Some(vec![PortBinding {
-            host_ip: None,
-            host_port: Some("3000".to_string()),
-        }]),
-    );
-
-    let mut log_opts = HashMap::new();
-    log_opts.insert("max-size".to_string(), "10m".to_string());
-    log_opts.insert("max-file".to_string(), "3".to_string());
-
-    let log_config = HostConfigLogConfig {
-        typ: Some("json-file".to_string()), // Log driver type
-        config: Some(log_opts),             // Log options
-    };
-
-    let config = Config::<String> {
-        image: Some(format!("{}:latest", app_name)),
-        exposed_ports: Some(exposed_ports),
-        host_config: Some(HostConfig {
-            port_bindings: Some(port_bindings),
-            log_config: Some(log_config), // Use HostConfigLogConfig here
-            ..Default::default()
-        }),
-        ..Default::default()
-    };
-
-    docker
-        .create_container(
-            Some(CreateContainerOptions {
-                name: &container_name,
-                platform: Some(&"linux/amd64".to_string()),
-            }),
-            config,
-        )
-        .await
-        .map_err(|e| format!("Failed to create container: {}", e))?;
-
-    docker
-        .start_container(&container_name, None::<StartContainerOptions<String>>)
-        .await
-        .map_err(|e| format!("Failed to start container: {}", e))?;
-
-    Ok(())
-}
-
-
 /// Stops the running container for the given application.
 ///
 /// Executes the `docker stop` command to stop the container with the given name.
@@ -411,14 +346,16 @@ pub async fn create_and_run_container(app_name: &str) -> Result<(), String> {
 /// A `Result` indicating success or an error message in case of failure.
 
 pub async fn stop_container(container_name: &str) -> Result<(), String> {
+    let docker = Docker::connect_with_local_defaults()
+        .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
+    let options = Some(StopContainerOptions { t: 30 });
+    docker
+        .stop_container(container_name, options)
+        .await
+        .map_err(|e| format!("Failed to start container: {}", e))?;
 
-    let output = Command::new("docker")
-    .args(&["stop", container_name])
-    .output()
-    .map_err(|e| format!("Failed to execute docker stop: {}", e))?;
     Ok(())
- }
-
+}
 
 /// Removes the container for the given application.
 ///
@@ -433,10 +370,15 @@ pub async fn stop_container(container_name: &str) -> Result<(), String> {
 /// A `Result` indicating success or an error message in case of failure.
 
 pub async fn remove_container(container_name: &str) -> Result<(), String> {
-    
-    let output = Command::new("docker")
-    .args(&["rm", container_name])
-    .output()
-    .map_err(|e| format!("Failed to execute docker stop: {}", e))?;
+    let docker = Docker::connect_with_local_defaults()
+        .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
+    let options = Some(RemoveContainerOptions {
+        force: true,
+        ..Default::default()
+    });
+    docker
+        .remove_container(container_name, options)
+        .await
+        .map_err(|e| format!("Failed to start container: {}", e))?;
     Ok(())
- }
+}

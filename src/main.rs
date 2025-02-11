@@ -1,7 +1,7 @@
 mod routes;
 mod services;
 
-use crate::routes::{create_app_route, health_check_route,remove_app_route,get_apps_route};
+use crate::routes::{create_app_route, get_apps_route, health_check_route, remove_app_route};
 
 use std::env;
 use warp::http::Method;

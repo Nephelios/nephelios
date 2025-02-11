@@ -1,7 +1,8 @@
 use crate::services::helpers::traefik_helper::{add_to_deploy, verif_app};
 
 use crate::services::helpers::docker_helper::{
-    build_image, generate_and_write_dockerfile,list_deployed_apps,AppMetadata, remove_container, stop_container, start_docker_compose
+    build_image, generate_and_write_dockerfile, list_deployed_apps, remove_container,
+    start_docker_compose, stop_container, AppMetadata,
 };
 
 use crate::services::helpers::traefik_helper::remove_app_compose;
@@ -39,8 +40,6 @@ pub fn create_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
         .boxed()
 }
 
-
-
 /// Creates the route for app removal.
 ///
 /// This route listens for POST requests at the `/remove` path and expects a JSON body.
@@ -51,10 +50,10 @@ pub fn create_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
 
 pub fn remove_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     warp::post()
-    .and(warp::path("remove"))
-    .and(warp::body::json()) // Expect a JSON body
-    .and_then(handle_remove_app)
-    .boxed()
+        .and(warp::path("remove"))
+        .and(warp::body::json()) // Expect a JSON body
+        .and_then(handle_remove_app)
+        .boxed()
 }
 
 /// Creates the route for health checks.
@@ -90,20 +89,32 @@ async fn handle_remove_app(body: Value) -> Result<impl warp::Reply, warp::Reject
         .and_then(Value::as_str)
         .unwrap_or("default-app");
 
-    stop_container(app_name).await;
+    let _ = stop_container(app_name).await.map_err(|e| {
+        warp::reject::custom(CustomError(format!(
+            "Failed to stop container for app {}: {}",
+            app_name, e
+        )))
+    })?;
 
-    remove_container(app_name).await;
+    let _ = remove_container(app_name).await.map_err(|e| {
+        warp::reject::custom(CustomError(format!(
+            "Failed to remove container for app {}: {}",
+            app_name, e
+        )))
+    })?;
 
-    remove_app_compose(app_name);
+    let _ = remove_app_compose(app_name).map_err(|e| {
+        warp::reject::custom(CustomError(format!(
+            "Failed to remove app compose file for app {}: {}",
+            app_name, e
+        )))
+    })?;
 
     Ok(warp::reply::with_status(
         format!("Remove app: {}.", app_name),
         warp::http::StatusCode::CREATED,
-        ))
-} 
-
-
-
+    ))
+}
 
 pub fn get_apps_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     warp::get()
