@@ -21,4 +21,3 @@ services:
       - "traefik.http.services.traefik.loadbalancer.server.port=8080"
     networks:
       - traefik-global-proxy
-

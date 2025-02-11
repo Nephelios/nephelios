@@ -1,12 +1,13 @@
 use crate::services::helpers::traefik_helper::{add_to_deploy, verif_app};
 
 use crate::services::helpers::docker_helper::{
-    build_image, generate_and_write_dockerfile, remove_container, stop_container, start_docker_compose
+    build_image, generate_and_write_dockerfile,list_deployed_apps,AppMetadata, remove_container, stop_container, start_docker_compose
 };
 
 use crate::services::helpers::traefik_helper::remove_app_compose;
 
 use crate::services::helpers::github_helper::{clone_repo, create_temp_dir, remove_temp_dir};
+use serde_json::json;
 use serde_json::Value;
 use warp::{reject, Filter};
 
@@ -70,7 +71,6 @@ pub fn health_check_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
         .boxed()
 }
 
-
 /// Handles the app removal logic.
 ///
 /// Extracts `app_name` from the JSON body and performs the necessary steps to remove the app:
@@ -104,6 +104,40 @@ async fn handle_remove_app(body: Value) -> Result<impl warp::Reply, warp::Reject
 
 
 
+
+pub fn get_apps_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
+    warp::get()
+        .and(warp::path("get-apps"))
+        .and_then(handle_get_apps)
+        .boxed()
+}
+
+pub async fn handle_get_apps() -> Result<impl warp::Reply, warp::Rejection> {
+    match list_deployed_apps().await {
+        Ok(apps) => {
+            let response = json!({
+                "status": "success",
+                "apps": apps,
+                "total": apps.len(),
+            });
+            Ok(warp::reply::with_status(
+                warp::reply::json(&response),
+                warp::http::StatusCode::OK,
+            ))
+        }
+        Err(e) => {
+            let response = json!({
+                "status": "error",
+                "message": format!("Failed to list apps: {}", e)
+            });
+            Ok(warp::reply::with_status(
+                warp::reply::json(&response),
+                warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+        }
+    }
+}
+
 /// Handles the app creation logic.
 ///
 /// Extracts `app_name`, `app_type`, and `github_url` from the JSON body.
@@ -129,12 +163,20 @@ async fn handle_create_app(body: Value) -> Result<impl warp::Reply, warp::Reject
 
     if github_url.is_none() || github_url.unwrap().is_empty() {
         return Ok(warp::reply::with_status(
-            "GitHub URL is required".to_string(),
+            warp::reply::json(&json!({
+                "error": "GitHub URL is required"
+            })),
             warp::http::StatusCode::BAD_REQUEST,
         ));
     }
 
     let github_url = github_url.unwrap();
+    let metadata = AppMetadata::new(
+        app_name.to_string(),
+        app_type.to_string(),
+        github_url.to_string(),
+    );
+
     let temp_dir = create_temp_dir(app_name).map_err(|e| {
         warp::reject::custom(CustomError(format!(
             "Failed to create temp directory: {}",
@@ -154,7 +196,7 @@ async fn handle_create_app(body: Value) -> Result<impl warp::Reply, warp::Reject
         ))));
     }
 
-    if let Err(e) = generate_and_write_dockerfile(app_type, temp_dir_path) {
+    if let Err(e) = generate_and_write_dockerfile(app_type, temp_dir_path, &metadata) {
         let _ = remove_temp_dir(&temp_dir);
         return Err(warp::reject::custom(CustomError(format!(
             "Failed to generate Dockerfile: {}",
@@ -162,7 +204,7 @@ async fn handle_create_app(body: Value) -> Result<impl warp::Reply, warp::Reject
         ))));
     }
 
-    if let Err(e) = build_image(app_name, temp_dir_path).await {
+    if let Err(e) = build_image(app_name, temp_dir_path, &metadata).await {
         let _ = remove_temp_dir(&temp_dir);
         return Err(warp::reject::custom(CustomError(format!(
             "Failed to build Docker image: {}",
@@ -205,11 +247,20 @@ async fn handle_create_app(body: Value) -> Result<impl warp::Reply, warp::Reject
         eprintln!("Warning: Failed to clean up temp directory: {}", e);
     }
 
+    let response = json!({
+        "message": "Application created successfully",
+        "app_name": app_name,
+        "app_type": app_type,
+        "github_url": github_url,
+        "url": format!("http://{}.localhost", app_name),
+        "metadata": {
+            "created_at": metadata.created_at,
+            "domain": metadata.domain,
+        }
+    });
+
     Ok(warp::reply::with_status(
-        format!(
-            "Created app: {} of type: {} with GitHub URL: {}",
-            app_name, app_type, github_url
-        ),
+        warp::reply::json(&response),
         warp::http::StatusCode::CREATED,
     ))
 }
