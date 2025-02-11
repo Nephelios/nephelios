@@ -18,8 +18,9 @@ walkdir = "2.3"
 reqwest = { version = "0.11", features = ["json"] }
 libc = "0.2"
 dotenv = "0.15"
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 bytes = "1.1"
+futures = "0.3"
 
 [[bin]]
 name = "nephelios"
