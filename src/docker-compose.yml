@@ -17,8 +17,9 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./traefik.toml:/etc/traefik/traefik.toml
-    labels:
-      - "traefik.http.services.traefik.loadbalancer.server.port=8080"
+    deploy:
+      labels:
+        - "traefik.http.services.traefik.loadbalancer.server.port=8080"
     networks:
       - traefik-global-proxy
       

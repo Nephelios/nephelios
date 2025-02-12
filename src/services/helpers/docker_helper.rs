@@ -1,4 +1,3 @@
-use bollard::container::RemoveContainerOptions;
 use bollard::container::{ListContainersOptions, StopContainerOptions};
 use bollard::image::BuildImageOptions;
 use bollard::Docker;
@@ -13,6 +12,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
+use bollard::service::{InspectServiceOptions, ListServicesOptions};
 use tar::Builder;
 use tokio::fs::File as TokioFile;
 use tokio_util::codec::{BytesCodec, FramedRead};
@@ -71,54 +71,67 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
 
-    let container_filters: HashMap<String, Vec<String>> = HashMap::new();
-    let container_options = ListContainersOptions {
-        all: true,
-        filters: container_filters,
-        ..Default::default()
-    };
+    let filters: HashMap<String, Vec<String>> = HashMap::new();
 
-    let containers = docker
-        .list_containers(Some(container_options))
+    let options = Some(ListServicesOptions{
+        filters,
+        ..Default::default()
+    });
+
+    let services = docker
+        .list_services(options)
         .await
-        .map_err(|e| format!("Failed to list containers: {}", e))?;
+        .map_err(|e| format!("Failed to list services: {}", e))?;
 
     let mut apps = Vec::new();
 
-    // Iterate over containers and check for custom labels
-    for container in containers {
-        if let Some(labels) = container.labels {
-            if let (Some(name), Some(app_type), Some(url), Some(domain), Some(created)) = (
-                labels.get("com.myapp.name"),
-                labels.get("com.myapp.type"),
-                labels.get("com.myapp.github_url"),
-                labels.get("com.myapp.domain"),
-                labels.get("com.myapp.created_at"),
-            ) {
-                // Get container's state/status
-                let status = match container.state {
-                    Some(ref state) => state.clone(),
-                    None => container
-                        .status
-                        .clone()
-                        .unwrap_or_else(|| "unknown".to_string()),
-                };
 
-                // Collect app info, handle Option<String> for container.id
-                apps.push(AppInfo {
-                    app_name: name.clone(),
-                    app_type: app_type.clone(),
-                    github_url: url.clone(),
-                    domain: domain.clone(),
-                    created_at: created.clone(),
-                    status,
-                    container_id: Some(
-                        container
-                            .id
-                            .clone()
-                            .unwrap_or_else(|| "unknown".to_string()),
-                    ),
-                });
+
+    let inspect_options = Some(InspectServiceOptions{
+        insert_defaults: true,
+    });
+
+
+    // Iterate over containers and check for custom labels
+    for service in services {
+        if let Some(spec) = docker.inspect_service(service.id.as_ref().unwrap(), inspect_options).await.unwrap().spec {
+            if let Some(labels) = spec.labels {
+                println!("{:?}", labels);
+                if let (Some(name), Some(app_type), Some(url), Some(domain), Some(created)) = (
+                    labels.get("com.myapp.name"),
+                    labels.get("com.myapp.type"),
+                    labels.get("com.myapp.github_url"),
+                    labels.get("com.myapp.domain"),
+                    labels.get("com.myapp.created_at"),
+                ) {
+
+                    // Get container's state/status
+                    let status = if let Some(service_status) = service.service_status {
+                        if service_status.running_tasks.unwrap_or(0) > 0 {
+                            "running".to_string()
+                        } else {
+                            "unknown".to_string()
+                        }
+                    } else {
+                        "unknown".to_string()
+                    };
+
+                    // Collect app info, handle Option<String> for container.id
+                    apps.push(AppInfo {
+                        app_name: name.clone(),
+                        app_type: app_type.clone(),
+                        github_url: url.clone(),
+                        domain: domain.clone(),
+                        created_at: created.clone(),
+                        status,
+                        container_id: Some(
+                            service
+                                .id
+                                .clone()
+                                .unwrap_or_else(|| "unknown".to_string()),
+                        ),
+                    });
+                }
             }
         }
     }
@@ -320,15 +333,20 @@ pub async fn build_image(
 pub fn start_docker_compose() -> Result<(), String> {
     let status = Command::new("docker")
         .current_dir("src")
-        .arg("compose")
-        .arg("up")
-        .arg("-d")
+        .arg("stack")
+        .arg("deploy")
+        .arg("-c")
+        .arg("docker-compose.yml")
+        .arg("nephelios")
         .status()
         .map_err(|e| format!("Failed to execute docker compose: {}", e))?;
 
     if !status.success() {
         return Err("Docker Compose command failed".to_string());
     }
+
+
+
 
     Ok(())
 }
@@ -363,21 +381,22 @@ pub async fn stop_container(container_name: &str) -> Result<(), String> {
 ///
 /// # Arguments
 ///
-/// * `container_name` - The name of the container to remove.
+/// * `app_name` - The name of the container to remove.
 ///
 /// # Returns
 ///
 /// A `Result` indicating success or an error message in case of failure.
 
-pub async fn remove_container(container_name: &str) -> Result<(), String> {
+pub async fn remove_service(app_name: &str) -> Result<(), String> {
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
-    let options = Some(RemoveContainerOptions {
-        force: true,
-        ..Default::default()
-    });
+
+    let service_name: &str = &format!("nephelios_{}", app_name);
+
+    println!("Removing service: {}", service_name);
+
     docker
-        .remove_container(container_name, options)
+        .delete_service(service_name)
         .await
         .map_err(|e| format!("Failed to start container: {}", e))?;
     Ok(())

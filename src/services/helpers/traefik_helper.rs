@@ -1,10 +1,9 @@
-use std::fs::File;
+use std::fs::{File, Metadata};
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
-
-
+use crate::services::helpers::docker_helper::AppMetadata;
 
 /// Verifies if the application is already deployed.
 ///
@@ -38,33 +37,39 @@ pub fn verif_app(app: &str) -> io::Result<i32> {
 /// # Returns
 /// * `Ok(())` if the application was successfully added.
 /// * `Err(String)` if there was an error during the addition.
-pub fn add_to_deploy(app: &str, port: &str) -> io::Result<()> {
+pub fn add_to_deploy(app: &str, port: &str, metadata: &AppMetadata) -> io::Result<()> {
     let path = PathBuf::from("src/docker-compose.yml");
     let mut file = OpenOptions::new().append(true).create(true).open(path)?;
 
     let service = app;
-    let container_name = app;
     let image = app;
-    let label = "labels";
+    let replicas = 1;
     let app = app;
     let port = port;
     let resultat = format!(
         r#"
   {}:
     image: {}:latest
-    container_name: {}
-    {}:
-      - "traefik.enable=true"
-      - "traefik.http.routers.{}.rule=Host(`{}.localhost`)"
-      - "traefik.http.routers.{}.entryPoints=websecure"
-      - "traefik.http.routers.{}.tls=true"
-      - "traefik.http.services.{}.loadbalancer.server.port={}"
+    deploy:
+        replicas: {}
+        labels:
+          - "com.myapp.name={}"
+          - "com.myapp.image={}:latest"
+          - "com.myapp.type={}"
+          - "com.myapp.github_url={}"
+          - "com.myapp.domain={}"
+          - "com.myapp.created_at={}"
+          - "traefik.enable=true"
+          - "traefik.http.routers.{}.rule=Host(`{}.localhost`)"
+          - "traefik.http.routers.{}.entryPoints=websecure"
+          - "traefik.http.routers.{}.tls=true"
+          - "traefik.http.services.{}.loadbalancer.server.port={}"
     networks:
       - traefik-global-proxy
-     
-    
+
+
 "#,
-        service, image, container_name, label, service, app, service, service, service, port
+        service, image, replicas, app, image, metadata.app_type, metadata.github_url, metadata.domain, metadata.created_at, service, app, service, service, service, port
     );
 
     file.write_all(resultat.as_bytes())?;

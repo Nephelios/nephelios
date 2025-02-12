@@ -1,7 +1,7 @@
 use crate::services::helpers::traefik_helper::{add_to_deploy, verif_app};
 
 use crate::services::helpers::docker_helper::{
-    build_image, generate_and_write_dockerfile, list_deployed_apps, remove_container,
+    build_image, generate_and_write_dockerfile, list_deployed_apps, remove_service,
     start_docker_compose, stop_container, AppMetadata,
 };
 
@@ -93,14 +93,16 @@ async fn handle_remove_app(body: Value) -> Result<impl warp::Reply, warp::Reject
         .and_then(Value::as_str)
         .unwrap_or("default-app");
 
+    /** @deprecated
     let _ = stop_container(app_name).await.map_err(|e| {
         warp::reject::custom(CustomError(format!(
             "Failed to stop container for app {}: {}",
             app_name, e
         )))
     })?;
+    **/
 
-    let _ = remove_container(app_name).await.map_err(|e| {
+    let _ = remove_service(app_name).await.map_err(|e| {
         warp::reject::custom(CustomError(format!(
             "Failed to remove container for app {}: {}",
             app_name, e
@@ -294,7 +296,7 @@ async fn handle_create_app(
             ))));
         }
     } else {
-        if let Err(e) = add_to_deploy(app_name, "3000") {
+        if let Err(e) = add_to_deploy(app_name, "3000", &metadata) {
             let _ = remove_temp_dir(&temp_dir);
             send_deployment_status(
                 &status_tx,
