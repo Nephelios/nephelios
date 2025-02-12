@@ -8,6 +8,7 @@ use std::env;
 use tokio::sync::broadcast;
 use warp::http::Method;
 use warp::Filter;
+use crate::services::helpers::docker_helper::start_docker_compose;
 
 /// Entry point for the application.
 ///
@@ -53,9 +54,15 @@ async fn main() {
         .or(remove_app_route())
         .with(cors);
 
+    if let Err(e) = start_docker_compose() {
+        eprintln!("Failed to start Docker Compose: {}", e);
+    }
+
     println!("🚀 Server running on http://127.0.0.1:{}", app_port);
 
     warp::serve(api_routes)
         .run(([127, 0, 0, 1], app_port))
         .await;
+
+
 }
