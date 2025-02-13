@@ -1,9 +1,9 @@
-use std::fs::{File, Metadata};
+use crate::services::helpers::docker_helper::AppMetadata;
 use std::fs;
 use std::fs::OpenOptions;
+use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
-use crate::services::helpers::docker_helper::AppMetadata;
 
 /// Verifies if the application is already deployed.
 ///
@@ -53,23 +53,19 @@ pub fn add_to_deploy(app: &str, port: &str, metadata: &AppMetadata) -> io::Resul
     deploy:
         replicas: {}
         labels:
+          - "traefik.enable=true"
+          - "traefik.http.routers.{}.rule=Host(`{}.localhost`)"
+          - "traefik.http.routers.{}.entryPoints=web"
+          - "traefik.http.services.{}.loadbalancer.server.port={}"
           - "com.myapp.name={}"
           - "com.myapp.image={}:latest"
           - "com.myapp.type={}"
           - "com.myapp.github_url={}"
           - "com.myapp.domain={}"
           - "com.myapp.created_at={}"
-          - "traefik.enable=true"
-          - "traefik.http.routers.{}.rule=Host(`{}.localhost`)"
-          - "traefik.http.routers.{}.entryPoints=websecure"
-          - "traefik.http.routers.{}.tls=true"
-          - "traefik.http.services.{}.loadbalancer.server.port={}"
-    networks:
-      - traefik-global-proxy
-
 
 "#,
-        service, image, replicas, app, image, metadata.app_type, metadata.github_url, metadata.domain, metadata.created_at, service, app, service, service, service, port
+        service, image, replicas, service, app, service, service, port, app, image, metadata.app_type, metadata.github_url, metadata.domain, metadata.created_at
     );
 
     file.write_all(resultat.as_bytes())?;
