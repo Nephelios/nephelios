@@ -1,10 +1,11 @@
-use bollard::container::RemoveContainerOptions;
 use bollard::container::{ListContainersOptions, StopContainerOptions};
+use bollard::container::{RemoveContainerOptions, StatsOptions};
 use bollard::image::BuildImageOptions;
 use bollard::Docker;
 use chrono::Utc;
 use dirs::home_dir;
 use futures_util::stream::StreamExt;
+use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -67,6 +68,27 @@ pub struct AppInfo {
     pub container_id: Option<String>,
 }
 
+/// Lists the deployed applications.
+/// Returns a vector of AppInfo structs.
+/// # Returns
+/// * `Ok(Vec<AppInfo>)` containing the deployed applications.
+/// * `Err(String)` if there is an error.
+/// # Example
+/// ```rust
+/// use crate::services::helpers::docker_helper::list_deployed_apps;
+/// #[tokio::main]
+/// async fn main() {
+///   let apps = list_deployed_apps().await;
+/// match apps {
+///   Ok(apps) => {
+///    for app in apps {
+///    println!("App: {}", app.app_name);
+///   }
+/// }
+/// Err(e) => eprintln!("Error: {}", e),
+/// }
+/// }
+/// ```
 pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
@@ -129,6 +151,50 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
     Ok(apps)
 }
 
+/// Gets the metrics for the specified container.
+/// Returns the first stats entry as a string.
+/// # Arguments
+/// * `container_name` - The name of the container to get metrics for.
+/// # Returns
+/// * `Ok(String)` containing the metrics.
+/// * `Err(String)` if there is an error.
+/// # Example
+/// ```rust
+/// use crate::services::helpers::docker_helper::get_metrics;
+/// #[tokio::main]
+/// async fn main() {
+///    let container_name = "my_container";
+///   let metrics = get_metrics(container_name).await;
+///  match metrics {
+///    Ok(stats) => println!("Container stats: {}", stats),
+///  Err(e) => eprintln!("Error: {}", e),
+/// }
+/// }
+/// ```
+pub async fn get_metrics(container_name: &str) -> Result<String, String> {
+    let docker = Docker::connect_with_local_defaults()
+        .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
+    let options = Some(StatsOptions {
+        stream: false,
+        one_shot: true,
+    });
+
+    let stats_stream = docker
+        .stats(container_name, options)
+        .map_err(|e| format!("Failed to get container stats: {}", e));
+
+    let stats: Vec<_> = stats_stream
+        .try_collect()
+        .await
+        .map_err(|e| format!("Failed to collect container stats: {}", e))?;
+
+    // Assuming you want to return the first stats entry as a string
+    if let Some(stat) = stats.first() {
+        Ok(format!("{:?}", stat))
+    } else {
+        Err("No stats found".to_string())
+    }
+}
 /// Creates a Docker context tarball for the specified application path.
 ///
 /// # Arguments

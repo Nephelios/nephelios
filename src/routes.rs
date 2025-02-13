@@ -1,7 +1,7 @@
 use crate::services::helpers::traefik_helper::{add_to_deploy, verif_app};
 
 use crate::services::helpers::docker_helper::{
-    build_image, generate_and_write_dockerfile, list_deployed_apps, remove_container,
+    build_image, generate_and_write_dockerfile, get_metrics, list_deployed_apps, remove_container,
     start_docker_compose, stop_container, AppMetadata,
 };
 
@@ -86,7 +86,6 @@ pub fn health_check_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
 /// # Returns
 ///
 /// A result containing a Warp reply or a Warp rejection.
-
 async fn handle_remove_app(body: Value) -> Result<impl warp::Reply, warp::Rejection> {
     let app_name = body
         .get("app_name")
@@ -120,6 +119,10 @@ async fn handle_remove_app(body: Value) -> Result<impl warp::Reply, warp::Reject
     ))
 }
 
+/// Creates the route for gettings apps
+/// This route listens for GET requests at the `/get-apps` path.
+/// It is used to get the list of deployed apps.
+/// Returns a boxed Warp filter that handles get apps requests.
 pub fn get_apps_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     warp::get()
         .and(warp::path("get-apps"))
@@ -127,7 +130,13 @@ pub fn get_apps_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
         .boxed()
 }
 
-pub async fn handle_get_apps() -> Result<impl warp::Reply, warp::Rejection> {
+/// Creates the route for gettings apps
+/// Retrieves the apps deployed on the server.
+/// Returns a JSON response containing the list of apps.
+/// If an error occurs, returns an error response.
+/// # Returns
+/// A result containing a Warp reply or a Warp rejection.
+async fn handle_get_apps() -> Result<impl warp::Reply, warp::Rejection> {
     match list_deployed_apps().await {
         Ok(apps) => {
             let response = json!({
@@ -151,6 +160,47 @@ pub async fn handle_get_apps() -> Result<impl warp::Reply, warp::Rejection> {
             ))
         }
     }
+}
+
+/// Creates the route for getting app metrics.
+/// This route listens for POST requests at the `/get-metrics` path and expects a JSON body.
+/// The JSON body should contain the following key:
+/// - `app_name`: The name of the application (default: "default-app").
+/// Returns a boxed Warp filter that handles get metrics requests.
+/// # Returns
+/// A boxed Warp filter that handles get metrics requests.
+pub fn get_metrics_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
+    warp::post()
+        .and(warp::path("get-metrics"))
+        .and(warp::body::json())
+        .and_then(handle_get_metrics)
+        .boxed()
+}
+
+/// Handles the app metrics logic.
+/// Extracts `app_name` from the JSON body and retrieves the metrics for the app.
+/// Returns a JSON response containing the metrics.
+/// If an error occurs, returns an error response.
+/// # Arguments
+/// * `body` - The JSON body received in the request, expected to contain `app_name`.
+/// # Returns
+/// A result containing a Warp reply or a Warp rejection.
+async fn handle_get_metrics(body: Value) -> Result<impl warp::Reply, warp::Rejection> {
+    let app_name = body
+        .get("app_name")
+        .and_then(Value::as_str)
+        .unwrap_or("default-app");
+    let metrics = get_metrics(app_name).await.map_err(|e| {
+        warp::reject::custom(CustomError(format!(
+            "Failed to get metrics for app {}: {}",
+            app_name, e
+        )))
+    })?;
+
+    Ok(warp::reply::with_status(
+        warp::reply::json(&metrics),
+        warp::http::StatusCode::OK,
+    ))
 }
 
 /// Handles the app creation logic.

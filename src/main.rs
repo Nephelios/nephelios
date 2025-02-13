@@ -4,6 +4,7 @@ mod services;
 use crate::routes::{create_app_route, get_apps_route, health_check_route, remove_app_route};
 use crate::services::websocket::ws_route;
 
+use routes::get_metrics_route;
 use std::env;
 use tokio::sync::broadcast;
 use warp::http::Method;
@@ -51,6 +52,7 @@ async fn main() {
         .or(get_apps_route())
         .or(ws_route(status_rx))
         .or(remove_app_route())
+        .or(get_metrics_route())
         .with(cors);
 
     println!("🚀 Server running on http://127.0.0.1:{}", app_port);
