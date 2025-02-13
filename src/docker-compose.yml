@@ -1,22 +1,22 @@
-version: '3.9'
-
-networks:
-  traefik-global-proxy:
-    name: "traefik-global-proxy"
-
 services:
   traefik:
-    image: traefik:v2.10
-    container_name: traefik
+    image: "traefik:v2.10"
+    container_name: "traefik"
     command:
-      - --configFile=/etc/traefik/traefik.toml
+      - "--log.level=DEBUG"
+      - "--log.filepath=/etc/traefik/traefik.log"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.swarmMode=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
     ports:
       - "80:80"
       - "443:443"
       - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./traefik.toml:/etc/traefik/traefik.toml
+      - ./traefik.log:/etc/traefik/traefik.log
     deploy:
       labels:
         - "traefik.http.services.traefik.loadbalancer.server.port=8080"
@@ -24,3 +24,7 @@ services:
       - traefik-global-proxy
       
   
+
+      placement:
+        constraints:
+          - node.role == manager
