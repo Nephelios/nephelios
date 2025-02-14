@@ -1,9 +1,11 @@
-use bollard::container::{ListContainersOptions, StopContainerOptions};
+use bollard::container::StopContainerOptions;
 use bollard::image::BuildImageOptions;
+use bollard::service::{InspectServiceOptions, ListServicesOptions};
 use bollard::Docker;
 use chrono::Utc;
 use dirs::home_dir;
 use futures_util::stream::StreamExt;
+use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -12,7 +14,6 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
-use bollard::service::{InspectServiceOptions, ListServicesOptions};
 use tar::Builder;
 use tokio::fs::File as TokioFile;
 use tokio_util::codec::{BytesCodec, FramedRead};
@@ -150,7 +151,7 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
 /// # Returns
 /// * `Ok(String)` containing the path to the created tarball.
 /// * `Err(String)` if there is an error.
-fn create_docker_context(app_path: &str) -> Result<String, String> {
+fn create_docker_context(app_name: &str, app_path: &str) -> Result<String, String> {
     let app_dir = Path::new(app_path)
         .canonicalize()
         .map_err(|e| format!("Invalid application path: {}", e))?;
@@ -161,8 +162,8 @@ fn create_docker_context(app_path: &str) -> Result<String, String> {
 
     let home = home_dir().ok_or("Failed to find home directory")?;
     let tar_path = home.join(format!(
-        "{}.tar",
-        app_dir.file_name().unwrap().to_string_lossy()
+        ".cache/nephelios/{}.tar",
+        app_name
     ));
 
     let tar_file =
@@ -283,7 +284,7 @@ pub async fn build_image(
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
 
-    let tar_path = create_docker_context(app_path).map_err(|e| format!("Error: {}", e))?;
+    let tar_path = create_docker_context(app_name, app_path).map_err(|e| format!("Error: {}", e))?;
     let tar_file = TokioFile::open(&tar_path)
         .await
         .map_err(|e| format!("Failed to open tar file: {}", e))?;
@@ -303,13 +304,12 @@ pub async fn build_image(
         ..Default::default()
     };
 
+
+    println!("Starting Docker image build for app: {}   ", app_name);
     let mut build_stream = docker.build_image(options, None, Some(body_bytes));
 
-    while let Some(log) = build_stream.next().await {
-        match log {
-            Ok(output) => println!("{:?}", output),
-            Err(e) => return Err(format!("Docker build failed: {}", e)),
-        }
+    if build_stream.try_next().await.transpose().is_none() {
+        return Err("Docker build failed: No build info received".to_string());
     }
 
     if let Err(e) = std::fs::remove_file(&tar_path) {
