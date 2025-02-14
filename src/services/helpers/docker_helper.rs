@@ -1,4 +1,4 @@
-use bollard::container::StopContainerOptions;
+use bollard::container::{ListContainersOptions, StopContainerOptions};
 use bollard::image::BuildImageOptions;
 use bollard::service::{InspectServiceOptions, ListServicesOptions};
 use bollard::Docker;
@@ -97,7 +97,7 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
     for service in services {
         if let Some(spec) = docker.inspect_service(service.id.as_ref().unwrap(), inspect_options).await.unwrap().spec {
             if let Some(labels) = spec.labels {
-                println!("{:?}", labels);
+
                 if let (Some(name), Some(app_type), Some(url), Some(domain), Some(created)) = (
                     labels.get("com.myapp.name"),
                     labels.get("com.myapp.type"),
@@ -107,12 +107,30 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
                 ) {
 
                     // Get container's state/status
-                    let status = if let Some(service_status) = service.service_status {
-                        if service_status.running_tasks.unwrap_or(0) > 0 {
-                            "running".to_string()
-                        } else {
-                            "unknown".to_string()
+                    let mut is_running = false;
+                    let containers = docker
+                        .list_containers(Some(ListContainersOptions {
+                            filters: {
+                                let mut filters = HashMap::new();
+                                filters.insert("label".to_string(), vec![format!("com.myapp.name={}", name.clone())]);
+                                filters
+                            },
+                            ..Default::default()
+                        }))
+                        .await
+                        .map_err(|e| format!("Failed to list containers: {}", e))?;
+
+                    for container in containers {
+                        if let Some(state) = container.state {
+                            if state == "running" {
+                                is_running = true;
+                                break;
+                            }
                         }
+                    }
+
+                    let status = if is_running {
+                        "running".to_string()
                     } else {
                         "unknown".to_string()
                     };
