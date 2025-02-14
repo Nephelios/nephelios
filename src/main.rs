@@ -56,13 +56,11 @@ async fn main() {
 
     if let Err(e) = start_docker_compose() {
         eprintln!("Failed to start Docker Compose: {}", e);
+    } else {
+        println!("🚀 Server running on http://127.0.0.1:{}", app_port);
+
+        warp::serve(api_routes)
+            .run(([127, 0, 0, 1], app_port))
+            .await;
     }
-
-    println!("🚀 Server running on http://127.0.0.1:{}", app_port);
-
-    warp::serve(api_routes)
-        .run(([127, 0, 0, 1], app_port))
-        .await;
-
-
 }
