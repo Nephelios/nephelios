@@ -308,7 +308,7 @@ pub async fn build_image(
         .map_err(|e| format!("Failed to read tar file: {}", e))?;
 
     let options = BuildImageOptions {
-        t: format!("{}",app_name.to_lowercase()),
+        t: format!("localhost:5000/{}:latest",app_name.to_lowercase()),
         rm: true,
         labels: metadata.to_labels(),
         ..Default::default()
@@ -318,6 +318,7 @@ pub async fn build_image(
 
     while let Some(build_result) = build_stream.next().await {
         match build_result {
+
             Ok(output) => {
                 if let Some(stream) = output.stream {
                     print!("Build Info: {}", stream);
