@@ -1,9 +1,6 @@
 use crate::services::helpers::traefik_helper::{add_to_deploy, verif_app};
 
-use crate::services::helpers::docker_helper::{
-    build_image, generate_and_write_dockerfile, list_deployed_apps, remove_service,
-    start_docker_compose, stop_container, AppMetadata,
-};
+use crate::services::helpers::docker_helper::{build_image, generate_and_write_dockerfile, list_deployed_apps, push_image, remove_service, start_docker_compose, AppMetadata};
 
 use crate::services::helpers::traefik_helper::remove_app_compose;
 
@@ -274,6 +271,19 @@ async fn handle_create_app(
         .await;
         return Err(warp::reject::custom(CustomError(format!(
             "Failed to build Docker image: {}",
+            e
+        ))));
+    }
+    if let Err(e) = push_image(app_name).await {
+        send_deployment_status(
+            &status_tx,
+            app_name,
+            "error",
+            &format!("Failed to push Docker image: {}", e),
+        )
+            .await;
+        return Err(warp::reject::custom(CustomError(format!(
+            "Failed to push Docker image: {}",
             e
         ))));
     }

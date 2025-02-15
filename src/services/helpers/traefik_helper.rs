@@ -1,7 +1,7 @@
 use crate::services::helpers::docker_helper::AppMetadata;
 use std::fs;
-use std::fs::OpenOptions;
 use std::fs::File;
+use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
@@ -47,9 +47,8 @@ pub fn add_to_deploy(app: &str, port: &str, metadata: &AppMetadata) -> io::Resul
     let app = app;
     let port = port;
     let resultat = format!(
-        r#"
-  {}:
-    image: {}:latest
+        r#"  {}:
+    image: localhost:5000/{}:latest
     deploy:
         replicas: {}
         labels:
@@ -63,7 +62,6 @@ pub fn add_to_deploy(app: &str, port: &str, metadata: &AppMetadata) -> io::Resul
           - "com.myapp.github_url={}"
           - "com.myapp.domain={}"
           - "com.myapp.created_at={}"
-
 "#,
         service, image, replicas, service, app, service, service, port, app, image, metadata.app_type, metadata.github_url, metadata.domain, metadata.created_at
     );
