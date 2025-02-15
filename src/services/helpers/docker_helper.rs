@@ -341,6 +341,67 @@ pub async fn build_image(
 
     Ok(())
 }
+/// Pushes a Docker image to a remote registry.
+///
+/// # Arguments
+///
+/// * `app_name` - The name of the Docker image to push.
+///
+/// # Returns
+///
+/// * `Ok(())` if the image was successfully pushed.
+/// * `Err(String)` if there was an error during the push process.
+pub async fn push_image(app_name: &str) -> Result<(), String> {
+    let docker = Docker::connect_with_local_defaults()
+        .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
+
+    // Nom de l'image locale
+    let local_image = format!("{}:latest", app_name.to_lowercase());
+    // Nom de l'image avec le registre
+    let remote_image = format!("localhost:5000/{}:latest", app_name.to_lowercase());
+
+    // Taguer l'image pour le registre
+    let tag_options = TagImageOptions {
+        repo: remote_image.clone(),
+        tag: "latest".parse().unwrap(),
+    };
+    docker
+        .tag_image(&local_image, Some(tag_options))
+        .await
+        .map_err(|e| format!("Failed to tag image: {}", e))?;
+
+    // Pousser l'image vers le registre
+    let push_options = PushImageOptions {
+        tag: "latest",
+        ..Default::default()
+    };
+
+    // Si votre registre nécessite une authentification, fournissez les identifiants
+    let credentials = Some(DockerCredentials {
+        ..Default::default()
+    });
+
+    let mut push_stream = docker.push_image(&*remote_image, Some(push_options), credentials);
+
+    while let Some(push_stream) = push_stream.next().await {
+        match push_stream {
+            Ok(output) => {
+                if let Some(stream) = output.progress {
+                    print!("Push Image info: {}", stream);
+                }
+                if let Some(error) = output.error {
+                    eprintln!("Error: {}", error);
+                }
+            }
+            Err(e) => {
+                eprintln!("Error during build: {}", e);
+                return Err(format!("Error during build: {}", e));
+            }
+        }
+    }
+
+    Ok(())
+}
 
 /// Runs the Docker Compose command to deploy the application.
 /// Creates and runs a Docker container from the specified image.
