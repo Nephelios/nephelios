@@ -1,5 +1,6 @@
+use bollard::auth::DockerCredentials;
 use bollard::container::{ListContainersOptions, StopContainerOptions};
-use bollard::image::BuildImageOptions;
+use bollard::image::{BuildImageOptions, PushImageOptions, TagImageOptions};
 use bollard::service::{InspectServiceOptions, ListServicesOptions};
 use bollard::Docker;
 use chrono::Utc;
@@ -11,15 +12,11 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::fs::File;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::Command;
 use tar::Builder;
-use tokio::fs::File as TokioFile;
-use tokio_util::codec::{BytesCodec, FramedRead};
 use walkdir::WalkDir;
-use warp::hyper::body::to_bytes;
-use warp::hyper::Body;
 
 #[derive(Debug, Clone)]
 pub struct AppMetadata {
@@ -303,31 +300,37 @@ pub async fn build_image(
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
 
     let tar_path = create_docker_context(app_name, app_path).map_err(|e| format!("Error: {}", e))?;
-    let tar_file = TokioFile::open(&tar_path)
-        .await
+    let mut tar_file = File::open(&tar_path)
         .map_err(|e| format!("Failed to open tar file: {}", e))?;
 
-    let tar_stream =
-        FramedRead::new(tar_file, BytesCodec::new()).map(|res| res.map(|b| b.freeze()));
-    let body = Body::wrap_stream(tar_stream);
-
-    let body_bytes = to_bytes(body)
-        .await
-        .map_err(|e| format!("Failed to convert Body to Bytes: {}", e))?;
+    let mut contents = Vec::new();
+    tar_file.read_to_end(&mut contents)
+        .map_err(|e| format!("Failed to read tar file: {}", e))?;
 
     let options = BuildImageOptions {
-        t: app_name.to_lowercase(),
+        t: format!("{}",app_name.to_lowercase()),
         rm: true,
         labels: metadata.to_labels(),
         ..Default::default()
     };
 
+    let mut build_stream = docker.build_image(options, None, Some(contents.into()));
 
-    println!("Starting Docker image build for app: {}   ", app_name);
-    let mut build_stream = docker.build_image(options, None, Some(body_bytes));
-
-    if build_stream.try_next().await.transpose().is_none() {
-        return Err("Docker build failed: No build info received".to_string());
+    while let Some(build_result) = build_stream.next().await {
+        match build_result {
+            Ok(output) => {
+                if let Some(stream) = output.stream {
+                    print!("Build Info: {}", stream);
+                }
+                if let Some(error) = output.error {
+                    eprintln!("Error: {}", error);
+                }
+            }
+            Err(e) => {
+                eprintln!("Error during build: {}", e);
+                return Err(format!("Error during build: {}", e));
+            }
+        }
     }
 
     if let Err(e) = std::fs::remove_file(&tar_path) {
