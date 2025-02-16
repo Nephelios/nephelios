@@ -38,8 +38,6 @@ async fn main() {
         .parse()
         .unwrap_or(3030);
 
-    let api_routes = create_app_route().or(health_check_route()).or(remove_app_route()).or(stop_app_route()).or(start_app_route());
-
     let cors = warp::cors()
         .allow_any_origin()
         .allow_methods(&[Method::GET, Method::POST, Method::OPTIONS])
@@ -49,6 +47,8 @@ async fn main() {
         .or(health_check_route())
         .or(get_apps_route())
         .or(remove_app_route())
+        .or(stop_app_route())
+        .or(start_app_route())
         .with(cors);
 
     println!("🚀 Server running on http://127.0.0.1:{}", app_port);

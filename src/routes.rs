@@ -56,6 +56,15 @@ pub fn remove_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
         .boxed()
 }
 
+
+/// Creates the route for stopping an app.
+///
+/// This route listens for POST requests at the `/stop` path and expects a JSON body.
+/// The JSON body should contain the following key:
+/// - `app_name`: The name of the application (default: "default-app").
+///
+/// Returns a boxed Warp filter that handles app stop requests.
+
 pub fn stop_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     warp::post()
     .and(warp::path("stop"))
@@ -63,6 +72,14 @@ pub fn stop_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     .and_then(handle_stop_app)
     .boxed()
 }
+
+/// Creates the route for starting an app.
+///
+/// This route listens for POST requests at the `/start` path and expects a JSON body.
+/// The JSON body should contain the following key:
+/// - `app_name`: The name of the application (default: "default-app").
+///
+/// Returns a boxed Warp filter that handles app start requests.
 
 pub fn start_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     warp::post()
@@ -86,10 +103,10 @@ pub fn health_check_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
         .boxed()
 }
 
-/// Handles the app removal logic.
+/// Handles the app start logic.
 ///
-/// Extracts `app_name` from the JSON body and performs the necessary steps to remove the app:
-/// stopping the running container, removing the container, and deleting the associated compose file.
+/// Extracts `app_name` from the JSON body and performs the necessary steps to start the app:
+/// adding the app to the deployment list and starting the Docker Compose process.
 ///
 /// # Arguments
 ///
@@ -106,9 +123,19 @@ async fn handle_start_app(body: Value) -> Result<impl warp::Reply, warp::Rejecti
         .and_then(Value::as_str)
         .unwrap_or("default-app");
 
-    add_to_deploy(app_name,"3000");
+    let _ = add_to_deploy(app_name, "3000").map_err(|e|{
+        warp::reject::custom(CustomError(format!(
+            "Failed to stop container for app {}: {}",
+            app_name, e
+        )))
+    })?;
 
-    start_docker_compose();
+    let _ = start_docker_compose().map_err(|e|{
+        warp::reject::custom(CustomError(format!(
+            "Failed to stop container for app {}: {}",
+            app_name, e
+        )))
+    })?;
 
     Ok(warp::reply::with_status(
         format!("start app: {}.", app_name),
@@ -117,6 +144,19 @@ async fn handle_start_app(body: Value) -> Result<impl warp::Reply, warp::Rejecti
 
 }
 
+/// Handles the app stop logic.
+///
+/// Extracts `app_name` from the JSON body and performs the necessary steps to stop the app:
+/// stopping the running container and deleting the associated compose file.
+///
+/// # Arguments
+///
+/// * `body` - The JSON body received in the request, expected to contain `app_name`.
+///
+/// # Returns
+///
+/// A result containing a Warp reply or a Warp rejection.
+
 async fn handle_stop_app(body: Value) -> Result<impl warp::Reply, warp::Rejection> {
 
     let app_name = body
@@ -124,9 +164,19 @@ async fn handle_stop_app(body: Value) -> Result<impl warp::Reply, warp::Rejectio
         .and_then(Value::as_str)
         .unwrap_or("default-app");
 
-    stop_container(app_name).await;
+    let _ = stop_container(app_name).await.map_err(|e|{
+        warp::reject::custom(CustomError(format!(
+            "Failed to stop container for app {}: {}",
+            app_name, e
+        )))
+    })?;
 
-    remove_app_compose(app_name);
+    let _ = remove_app_compose(app_name).map_err(|e|{
+        warp::reject::custom(CustomError(format!(
+            "Failed to remove app compose for app {}: {}",
+            app_name, e
+        )))
+    })?;
 
     Ok(warp::reply::with_status(
         format!("stop app: {}.", app_name),
@@ -134,6 +184,19 @@ async fn handle_stop_app(body: Value) -> Result<impl warp::Reply, warp::Rejectio
         ))
 
 }
+
+/// Handles the app removal logic.
+///
+/// Extracts `app_name` from the JSON body and performs the necessary steps to remove the app:
+/// stopping the running container, removing the container, and deleting the associated compose file.
+///
+/// # Arguments
+///
+/// * `body` - The JSON body received in the request, expected to contain `app_name`.
+///
+/// # Returns
+///
+/// A result containing a Warp reply or a Warp rejection.
 
 async fn handle_remove_app(body: Value) -> Result<impl warp::Reply, warp::Rejection> {
     let app_name = body
@@ -213,6 +276,7 @@ pub async fn handle_get_apps() -> Result<impl warp::Reply, warp::Rejection> {
 /// # Returns
 ///
 /// A result containing a Warp reply or a Warp rejection.
+
 async fn handle_create_app(body: Value) -> Result<impl warp::Reply, warp::Rejection> {
     let app_name = body
         .get("app_name")
