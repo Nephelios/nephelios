@@ -22,15 +22,4 @@ services:
     networks:
       - traefik-global-proxy
 
-  eeevvv:
-    image: eeevvv:latest
-    container_name: eeevvv
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.eeevvv.rule=Host(`eeevvv.localhost`)"
-      - "traefik.http.routers.eeevvv.entryPoints=websecure"
-      - "traefik.http.routers.eeevvv.tls=true"
-      - "traefik.http.services.eeevvv.loadbalancer.server.port=3000"
-    networks:
-      - traefik-global-proxy
      
