@@ -357,7 +357,7 @@ pub async fn push_image(app_name: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
 
     // Nom de l'image locale
-    let local_image = format!("{}:latest", app_name.to_lowercase());
+    let local_image = format!("localhost:5000/{}:latest", app_name.to_lowercase());
     // Nom de l'image avec le registre
     let remote_image = format!("localhost:5000/{}:latest", app_name.to_lowercase());
 
