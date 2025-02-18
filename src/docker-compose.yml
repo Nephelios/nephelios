@@ -10,7 +10,6 @@ services:
       - registry_data:/var/lib/registry
   traefik:
     image: "traefik:v2.10"
-    container_name: "traefik"
     command:
       - "--log.level=DEBUG"
       - "--log.filepath=/etc/traefik/traefik.log"
