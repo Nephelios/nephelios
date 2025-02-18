@@ -168,170 +168,172 @@ async fn handle_create_app(
     body: Value,
     status_tx: StatusSender,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-    let app_name = body
-        .get("app_name")
-        .and_then(Value::as_str)
-        .unwrap_or("default-app");
-    let app_type = body
-        .get("app_type")
-        .and_then(Value::as_str)
-        .unwrap_or("nodejs");
-    let github_url = body.get("github_url").and_then(Value::as_str);
 
-    if github_url.is_none() || github_url.unwrap().is_empty() {
-        send_deployment_status(&status_tx, app_name, "error", "GitHub URL is required").await;
-        return Ok(warp::reply::with_status(
-            warp::reply::json(&json!({
+    let job = tokio::spawn(async move {
+        let app_name = body
+            .get("app_name")
+            .and_then(Value::as_str)
+            .unwrap_or("default-app");
+        let app_type = body
+            .get("app_type")
+            .and_then(Value::as_str)
+            .unwrap_or("nodejs");
+        let github_url = body.get("github_url").and_then(Value::as_str);
+
+        if github_url.is_none() || github_url.unwrap().is_empty() {
+            send_deployment_status(&status_tx, app_name, "error", "GitHub URL is required").await;
+            return Ok(warp::reply::with_status(
+                warp::reply::json(&json!({
                 "error": "GitHub URL is required"
             })),
-            warp::http::StatusCode::BAD_REQUEST,
-        ));
-    }
+                warp::http::StatusCode::BAD_REQUEST,
+            ));
+        }
 
-    let github_url = github_url.unwrap();
-    let metadata = AppMetadata::new(
-        app_name.to_string(),
-        app_type.to_string(),
-        github_url.to_string(),
-    );
+        let github_url = github_url.unwrap();
+        let metadata = AppMetadata::new(
+            app_name.to_string(),
+            app_type.to_string(),
+            github_url.to_string(),
+        );
 
-    // Clone repository
-    send_deployment_status(&status_tx, app_name, "in_progress", "Cloning repository").await;
-    let temp_dir = match create_temp_dir(app_name) {
-        Ok(dir) => dir,
-        Err(e) => {
+        // Clone repository
+        send_deployment_status(&status_tx, app_name, "in_progress", "Cloning repository").await;
+        let temp_dir = match create_temp_dir(app_name) {
+            Ok(dir) => dir,
+            Err(e) => {
+                send_deployment_status(
+                    &status_tx,
+                    app_name,
+                    "error",
+                    &format!("Failed to create temp directory: {}", e),
+                )
+                    .await;
+                return Err(warp::reject::custom(CustomError(format!(
+                    "Failed to create temp directory: {}",
+                    e
+                ))));
+            }
+        };
+
+        let temp_dir_path = match temp_dir.to_str() {
+            Some(path) => path,
+            None => {
+                send_deployment_status(&status_tx, app_name, "error", "Invalid temp directory path")
+                    .await;
+                return Err(warp::reject::custom(CustomError(
+                    "Temp directory path is invalid".to_string(),
+                )));
+            }
+        };
+
+        if let Err(e) = clone_repo(github_url, temp_dir_path) {
+            let _ = remove_temp_dir(&temp_dir);
             send_deployment_status(
                 &status_tx,
                 app_name,
                 "error",
-                &format!("Failed to create temp directory: {}", e),
+                &format!("Failed to clone repository: {}", e),
             )
-            .await;
-            return Err(warp::reject::custom(CustomError(format!(
-                "Failed to create temp directory: {}",
-                e
-            ))));
-        }
-    };
-
-    let temp_dir_path = match temp_dir.to_str() {
-        Some(path) => path,
-        None => {
-            send_deployment_status(&status_tx, app_name, "error", "Invalid temp directory path")
                 .await;
-            return Err(warp::reject::custom(CustomError(
-                "Temp directory path is invalid".to_string(),
-            )));
+            return Err(warp::reject::custom(CustomError(format!(
+                "Failed to clone repository: {}",
+                e
+            ))));
         }
-    };
 
-    if let Err(e) = clone_repo(github_url, temp_dir_path) {
-        let _ = remove_temp_dir(&temp_dir);
-        send_deployment_status(
-            &status_tx,
-            app_name,
-            "error",
-            &format!("Failed to clone repository: {}", e),
-        )
-        .await;
-        return Err(warp::reject::custom(CustomError(format!(
-            "Failed to clone repository: {}",
-            e
-        ))));
-    }
-
-    // Generate Dockerfile
-    if let Err(e) = generate_and_write_dockerfile(app_type, temp_dir_path, &metadata) {
-        let _ = remove_temp_dir(&temp_dir);
-        send_deployment_status(
-            &status_tx,
-            app_name,
-            "error",
-            &format!("Failed to generate Dockerfile: {}", e),
-        )
-        .await;
-        return Err(warp::reject::custom(CustomError(format!(
-            "Failed to generate Dockerfile: {}",
-            e
-        ))));
-    }
-
-    send_deployment_status(&status_tx, app_name, "success", "Cloning repository").await;
-
-    // Build Docker image
-    send_deployment_status(&status_tx, app_name, "in_progress", "Building Docker image").await;
-    if let Err(e) = build_image(app_name, temp_dir_path, &metadata).await {
-        let _ = remove_temp_dir(&temp_dir);
-        send_deployment_status(
-            &status_tx,
-            app_name,
-            "error",
-            &format!("Failed to build Docker image: {}", e),
-        )
-        .await;
-        return Err(warp::reject::custom(CustomError(format!(
-            "Failed to build Docker image: {}",
-            e
-        ))));
-    }
-
-    send_deployment_status(&status_tx, app_name, "success", "Building Docker image").await;
-
-    send_deployment_status(&status_tx, app_name, "in_progress", "Starting deployment").await;
-    if let Ok(1) = verif_app(app_name) {
-        if let Err(e) = start_docker_compose() {
+        // Generate Dockerfile
+        if let Err(e) = generate_and_write_dockerfile(app_type, temp_dir_path, &metadata) {
             let _ = remove_temp_dir(&temp_dir);
             send_deployment_status(
                 &status_tx,
                 app_name,
                 "error",
-                &format!("Failed to update deployment: {}", e),
+                &format!("Failed to generate Dockerfile: {}", e),
             )
-            .await;
+                .await;
             return Err(warp::reject::custom(CustomError(format!(
-                "Failed to execute docker compose: {}",
+                "Failed to generate Dockerfile: {}",
                 e
             ))));
         }
-    } else {
-        if let Err(e) = add_to_deploy(app_name, "3000", &metadata) {
+
+        send_deployment_status(&status_tx, app_name, "success", "Cloning repository").await;
+
+        // Build Docker image
+        send_deployment_status(&status_tx, app_name, "in_progress", "Building Docker image").await;
+        if let Err(e) = build_image(app_name, temp_dir_path, &metadata).await {
             let _ = remove_temp_dir(&temp_dir);
             send_deployment_status(
                 &status_tx,
                 app_name,
                 "error",
-                &format!("Failed to add app to deploy file: {}", e),
+                &format!("Failed to build Docker image: {}", e),
             )
-            .await;
+                .await;
             return Err(warp::reject::custom(CustomError(format!(
-                "Failed to add app to deploy file: {}",
+                "Failed to build Docker image: {}",
                 e
             ))));
         }
 
-        if let Err(e) = start_docker_compose() {
-            let _ = remove_temp_dir(&temp_dir);
-            send_deployment_status(
-                &status_tx,
-                app_name,
-                "error",
-                &format!("Failed to start deployment: {}", e),
-            )
-            .await;
-            return Err(warp::reject::custom(CustomError(format!(
-                "Failed to execute docker compose: {}",
-                e
-            ))));
+        send_deployment_status(&status_tx, app_name, "success", "Building Docker image").await;
+
+        send_deployment_status(&status_tx, app_name, "in_progress", "Starting deployment").await;
+        if let Ok(1) = verif_app(app_name) {
+            if let Err(e) = start_docker_compose() {
+                let _ = remove_temp_dir(&temp_dir);
+                send_deployment_status(
+                    &status_tx,
+                    app_name,
+                    "error",
+                    &format!("Failed to update deployment: {}", e),
+                )
+                    .await;
+                return Err(warp::reject::custom(CustomError(format!(
+                    "Failed to execute docker compose: {}",
+                    e
+                ))));
+            }
+        } else {
+            if let Err(e) = add_to_deploy(app_name, "3000", &metadata) {
+                let _ = remove_temp_dir(&temp_dir);
+                send_deployment_status(
+                    &status_tx,
+                    app_name,
+                    "error",
+                    &format!("Failed to add app to deploy file: {}", e),
+                )
+                    .await;
+                return Err(warp::reject::custom(CustomError(format!(
+                    "Failed to add app to deploy file: {}",
+                    e
+                ))));
+            }
+
+            if let Err(e) = start_docker_compose() {
+                let _ = remove_temp_dir(&temp_dir);
+                send_deployment_status(
+                    &status_tx,
+                    app_name,
+                    "error",
+                    &format!("Failed to start deployment: {}", e),
+                )
+                    .await;
+                return Err(warp::reject::custom(CustomError(format!(
+                    "Failed to execute docker compose: {}",
+                    e
+                ))));
+            }
         }
-    }
 
-    send_deployment_status(&status_tx, app_name, "success", "Starting deployment").await;
+        send_deployment_status(&status_tx, app_name, "success", "Starting deployment").await;
 
-    if let Err(e) = remove_temp_dir(&temp_dir) {
-        eprintln!("Warning: Failed to clean up temp directory: {}", e);
-    }
+        if let Err(e) = remove_temp_dir(&temp_dir) {
+            eprintln!("Warning: Failed to clean up temp directory: {}", e);
+        }
 
-    let response = json!({
+        let response = json!({
         "message": "Application created successfully",
         "app_name": app_name,
         "app_type": app_type,
@@ -340,11 +342,29 @@ async fn handle_create_app(
         "metadata": {
             "created_at": metadata.created_at,
             "domain": metadata.domain,
-        }
+            }
+        });
+
+        Ok(warp::reply::with_status(
+            warp::reply::json(&response),
+            warp::http::StatusCode::CREATED,
+        ))
     });
 
-    Ok(warp::reply::with_status(
-        warp::reply::json(&response),
-        warp::http::StatusCode::CREATED,
-    ))
+    let res = job.await;
+
+    match res {
+        Ok(inner_res) => match inner_res {
+            Ok(response) => Ok(warp::reply::with_status(response, warp::http::StatusCode::CREATED)),
+            Err(err) => Err(warp::reject::custom(CustomError(format!(
+                "An error occurred inside the async task: {:?}",
+                err
+            )))),
+        },
+        Err(join_err) => Err(warp::reject::custom(CustomError(format!(
+            "Task failed to execute: {}",
+            join_err
+        )))),
+    }
+
 }
