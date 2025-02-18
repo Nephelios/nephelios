@@ -1,6 +1,6 @@
 use crate::services::helpers::traefik_helper::{add_to_deploy, verif_app};
 
-use crate::services::helpers::docker_helper::{build_image, generate_and_write_dockerfile, list_deployed_apps, push_image, remove_service, start_docker_compose, AppMetadata};
+use crate::services::helpers::docker_helper::{build_image, deploy_nephelios_stack, generate_and_write_dockerfile, list_deployed_apps, push_image, remove_service, AppMetadata};
 
 use crate::services::helpers::traefik_helper::remove_app_compose;
 
@@ -283,7 +283,7 @@ async fn handle_create_app(
 
         send_deployment_status(&status_tx, app_name, "in_progress", "Starting deployment").await;
         if let Ok(1) = verif_app(app_name) {
-            if let Err(e) = start_docker_compose() {
+            if let Err(e) = deploy_nephelios_stack() {
                 let _ = remove_temp_dir(&temp_dir);
                 send_deployment_status(
                     &status_tx,
@@ -313,7 +313,7 @@ async fn handle_create_app(
                 ))));
             }
 
-            if let Err(e) = start_docker_compose() {
+            if let Err(e) = deploy_nephelios_stack() {
                 let _ = remove_temp_dir(&temp_dir);
                 send_deployment_status(
                     &status_tx,
