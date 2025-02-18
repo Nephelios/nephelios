@@ -1,6 +1,7 @@
 use crate::services::helpers::traefik_helper::{add_to_deploy, verif_app};
+use futures_util::TryFutureExt;
 
-use crate::services::helpers::docker_helper::{build_image, deploy_nephelios_stack, generate_and_write_dockerfile, list_deployed_apps, push_image, remove_service, AppMetadata};
+use crate::services::helpers::docker_helper::{build_image, deploy_nephelios_stack, generate_and_write_dockerfile, list_deployed_apps, prune_images, remove_service, AppMetadata};
 
 use crate::services::helpers::traefik_helper::remove_app_compose;
 
@@ -169,7 +170,7 @@ async fn handle_create_app(
     status_tx: StatusSender,
 ) -> Result<impl warp::Reply, warp::Rejection> {
 
-    let job = tokio::spawn(async move {
+    let _ = tokio::spawn(async move {
         let app_name = body
             .get("app_name")
             .and_then(Value::as_str)
@@ -277,8 +278,6 @@ async fn handle_create_app(
             ))));
         }
 
-        let _ = push_image(app_name).await;
-
         send_deployment_status(&status_tx, app_name, "success", "Building Docker image").await;
 
         send_deployment_status(&status_tx, app_name, "in_progress", "Starting deployment").await;
@@ -335,6 +334,14 @@ async fn handle_create_app(
             eprintln!("Warning: Failed to clean up temp directory: {}", e);
         }
 
+        tokio::spawn(async move {
+            let res_prune_images = prune_images().await;
+            match res_prune_images {
+                Ok(_) => println!("✅ Docker images pruned successfully"),
+                Err(e) => eprintln!("❌ Failed to prune Docker images: {}", e)
+            }
+        });
+
         let response = json!({
         "message": "Application created successfully",
         "app_name": app_name,
@@ -353,20 +360,5 @@ async fn handle_create_app(
         ))
     });
 
-    let res = job.await;
-
-    match res {
-        Ok(inner_res) => match inner_res {
-            Ok(response) => Ok(warp::reply::with_status(response, warp::http::StatusCode::CREATED)),
-            Err(err) => Err(warp::reject::custom(CustomError(format!(
-                "An error occurred inside the async task: {:?}",
-                err
-            )))),
-        },
-        Err(join_err) => Err(warp::reject::custom(CustomError(format!(
-            "Task failed to execute: {}",
-            join_err
-        )))),
-    }
-
+    Ok(warp::reply::with_status("Deployment Job has been created !", warp::http::StatusCode::CREATED))
 }

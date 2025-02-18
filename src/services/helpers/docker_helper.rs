@@ -1,6 +1,6 @@
 use bollard::auth::DockerCredentials;
 use bollard::container::{ListContainersOptions, StopContainerOptions};
-use bollard::image::{BuildImageOptions, PushImageOptions, TagImageOptions};
+use bollard::image::{BuildImageOptions, PruneImagesOptions, PushImageOptions, TagImageOptions};
 use bollard::service::{InspectServiceOptions, ListServicesOptions};
 use bollard::Docker;
 use chrono::Utc;
@@ -575,4 +575,40 @@ pub fn check_swarm() -> Result<bool, String> {
         .map_err(|e| format!("Failed to execute docker info: {}", e))?;
 
     Ok(String::from_utf8_lossy(&swarm_info.stdout).contains("Swarm: active"))
+}
+/// Prunes unused Docker images.
+///
+/// Connects to the local Docker daemon and removes all dangling images.
+///
+/// # Returns
+///
+/// * `Ok(())` if the images were successfully pruned.
+/// * `Err(String)` if there was an error during the pruning process.
+pub async fn prune_images() -> Result<(), String> {
+    let docker = Docker::connect_with_local_defaults()
+        .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
+
+    let filters: HashMap<String, Vec<String>> = HashMap::new();
+    let options = Some(PruneImagesOptions {
+        filters
+    });
+
+    let result = docker
+        .prune_images(options)
+        .await
+        .map_err(|e| format!("Failed to prune images: {}", e))?;
+
+    match &result.images_deleted {
+        None => println!("No images deleted"),
+        Some(images_deleted) => {
+            for image in images_deleted {
+                match &image.deleted {
+                    None => {}
+                    Some(deleted) => println!("Deleted image: {}", deleted)
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
