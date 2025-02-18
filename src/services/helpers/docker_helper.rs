@@ -13,6 +13,7 @@ use std::env;
 use std::fs;
 use std::fs::File;
 use std::io::{Read, Write};
+use std::net::IpAddr;
 use std::path::Path;
 use std::process::Command;
 use tar::Builder;
@@ -321,7 +322,7 @@ pub async fn build_image(
 
             Ok(output) => {
                 if let Some(stream) = output.stream {
-                    print!("Build Info: {}", stream);
+                    println!("Build Info: {}", stream);
                 }
                 if let Some(error) = output.error {
                     eprintln!("Error: {}", error);
@@ -329,7 +330,6 @@ pub async fn build_image(
             }
             Err(e) => {
                 eprintln!("Error during build: {}", e);
-                return Err(format!("Error during build: {}", e));
             }
         }
     }
@@ -388,15 +388,14 @@ pub async fn push_image(app_name: &str) -> Result<(), String> {
         match push_stream {
             Ok(output) => {
                 if let Some(stream) = output.progress {
-                    print!("Push Image info: {}", stream);
+                    println!("Push Image info: {}", stream);
                 }
                 if let Some(error) = output.error {
                     eprintln!("Error: {}", error);
                 }
             }
             Err(e) => {
-                eprintln!("Error during build: {}", e);
-                return Err(format!("Error during build: {}", e));
+                eprintln!("Error pushing image: {}", e);
             }
         }
     }
@@ -413,7 +412,7 @@ pub async fn push_image(app_name: &str) -> Result<(), String> {
 /// # Returns
 /// * `Ok(())` if the Docker Compose command was successful.
 /// * `Err(String)` if there was an error during execution.
-pub fn start_docker_compose() -> Result<(), String> {
+pub fn deploy_nephelios_stack() -> Result<(), String> {
     let status = Command::new("docker")
         .current_dir("src")
         .arg("stack")
@@ -427,9 +426,6 @@ pub fn start_docker_compose() -> Result<(), String> {
     if !status.success() {
         return Err("Docker Compose command failed".to_string());
     }
-
-
-
 
     Ok(())
 }
@@ -483,4 +479,100 @@ pub async fn remove_service(app_name: &str) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to start container: {}", e))?;
     Ok(())
+}
+
+/// Leaves the Docker Swarm.
+///
+/// Executes the `docker swarm leave -f` command to forcefully leave the Docker Swarm.
+///
+/// # Returns
+///
+/// * `Ok(())` if the command was successful.
+/// * `Err(String)` if there was an error during execution.
+pub fn leave_swarm() -> Result<(), String> {
+    let status = Command::new("docker")
+        .arg("swarm")
+        .arg("leave")
+        .arg("-f")
+        .status()
+        .map_err(|e| format!("Failed to execute leave swarm: {}", e))?;
+
+    if !status.success() {
+        return Err("Docker Compose command failed".to_string());
+    }
+
+    Ok(())
+}
+
+
+/// Stops the Nephelios stack by removing the Docker stack.
+///
+/// # Returns
+///
+/// * `Ok(())` if the stack was successfully stopped.
+/// * `Err(String)` if there was an error during the process.
+pub fn stop_nephelios_stack() -> Result<(), String> {
+
+    let status = Command::new("docker")
+        .arg("stack")
+        .arg("rm")
+        .arg("nephelios")
+        .status()
+        .map_err(|e| format!("Failed to execute remove Nephelios: {}", e))?;
+
+    if !status.success() {
+        return Err("Docker Compose command failed".to_string());
+    }
+
+    Ok(())
+}
+
+
+/// Initializes Docker Swarm with the given IP address.
+///
+/// # Arguments
+///
+/// * `ip_addr` - The IP address to advertise for the Docker Swarm.
+///
+/// # Returns
+///
+/// * `Ok(())` if the Docker Swarm was successfully initialized.
+/// * `Err(String)` if there was an error during initialization.
+pub fn init_swarm(ip_addr: IpAddr) -> Result<(), String> {
+    let addr_parameter = format!("--advertise-addr={}", env::var("ADVERTISE_ADDR").unwrap_or_else(|_| {
+        // Specify a default IP address if ADVERTISE_ADDR is not set
+        ip_addr.to_string()
+    }));
+
+    println!("Init swarm with address: {}", addr_parameter);
+    let status = Command::new("docker")
+        .arg("swarm")
+        .arg("init")
+        .arg(addr_parameter)
+        .status()
+        .map_err(|e| format!("Failed to execute init swarm: {}", e))?;
+
+    if !status.success() {
+        return Err("Docker Compose command failed".to_string());
+    }
+
+    Ok(())
+}
+
+/// Checks if Docker Swarm is active.
+///
+/// Executes the `docker info` command and checks the output for the presence of "Swarm: active".
+///
+/// # Returns
+///
+/// * `Ok(true)` if Docker Swarm is active.
+/// * `Ok(false)` if Docker Swarm is not active.
+/// * `Err(String)` if there was an error during execution.
+pub fn check_swarm() -> Result<bool, String> {
+    let swarm_info = Command::new("docker")
+        .arg("info")
+        .output()
+        .map_err(|e| format!("Failed to execute docker info: {}", e))?;
+
+    Ok(String::from_utf8_lossy(&swarm_info.stdout).contains("Swarm: active"))
 }
