@@ -1,7 +1,7 @@
 use crate::services::helpers::traefik_helper::{add_to_deploy, verif_app};
 use futures_util::TryFutureExt;
 
-use crate::services::helpers::docker_helper::{build_image, deploy_nephelios_stack, generate_and_write_dockerfile, list_deployed_apps, prune_images, remove_service, AppMetadata};
+use crate::services::helpers::docker_helper::{build_image, deploy_nephelios_stack, generate_and_write_dockerfile, list_deployed_apps, prune_images, push_image, remove_service, AppMetadata};
 
 use crate::services::helpers::traefik_helper::remove_app_compose;
 
@@ -210,7 +210,7 @@ async fn handle_create_app(
                     &format!("Failed to create temp directory: {}", e),
                 )
                     .await;
-                return Err(warp::reject::custom(CustomError(format!(
+                return Err(reject::custom(CustomError(format!(
                     "Failed to create temp directory: {}",
                     e
                 ))));
@@ -222,7 +222,7 @@ async fn handle_create_app(
             None => {
                 send_deployment_status(&status_tx, app_name, "error", "Invalid temp directory path")
                     .await;
-                return Err(warp::reject::custom(CustomError(
+                return Err(reject::custom(CustomError(
                     "Temp directory path is invalid".to_string(),
                 )));
             }
@@ -237,7 +237,7 @@ async fn handle_create_app(
                 &format!("Failed to clone repository: {}", e),
             )
                 .await;
-            return Err(warp::reject::custom(CustomError(format!(
+            return Err(reject::custom(CustomError(format!(
                 "Failed to clone repository: {}",
                 e
             ))));
@@ -253,7 +253,7 @@ async fn handle_create_app(
                 &format!("Failed to generate Dockerfile: {}", e),
             )
                 .await;
-            return Err(warp::reject::custom(CustomError(format!(
+            return Err(reject::custom(CustomError(format!(
                 "Failed to generate Dockerfile: {}",
                 e
             ))));
@@ -272,13 +272,20 @@ async fn handle_create_app(
                 &format!("Failed to build Docker image: {}", e),
             )
                 .await;
-            return Err(warp::reject::custom(CustomError(format!(
+            return Err(reject::custom(CustomError(format!(
                 "Failed to build Docker image: {}",
                 e
             ))));
         }
 
         send_deployment_status(&status_tx, app_name, "success", "Building Docker image").await;
+
+        if let Err(e) = push_image(app_name).await {
+            return Err(reject::custom(CustomError(format!(
+                "Failed to push Docker image: {}",
+                e
+            ))));
+        }
 
         send_deployment_status(&status_tx, app_name, "in_progress", "Starting deployment").await;
         if let Ok(1) = verif_app(app_name) {
@@ -291,7 +298,7 @@ async fn handle_create_app(
                     &format!("Failed to update deployment: {}", e),
                 )
                     .await;
-                return Err(warp::reject::custom(CustomError(format!(
+                return Err(reject::custom(CustomError(format!(
                     "Failed to execute docker compose: {}",
                     e
                 ))));
@@ -306,7 +313,7 @@ async fn handle_create_app(
                     &format!("Failed to add app to deploy file: {}", e),
                 )
                     .await;
-                return Err(warp::reject::custom(CustomError(format!(
+                return Err(reject::custom(CustomError(format!(
                     "Failed to add app to deploy file: {}",
                     e
                 ))));
@@ -321,7 +328,7 @@ async fn handle_create_app(
                     &format!("Failed to start deployment: {}", e),
                 )
                     .await;
-                return Err(warp::reject::custom(CustomError(format!(
+                return Err(reject::custom(CustomError(format!(
                     "Failed to execute docker compose: {}",
                     e
                 ))));
