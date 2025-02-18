@@ -4,7 +4,7 @@ mod services;
 use crate::routes::{create_app_route, get_apps_route, health_check_route, remove_app_route};
 use crate::services::websocket::ws_route;
 
-use crate::services::helpers::docker_helper::{check_swarm, deploy_nephelios_stack, init_swarm, leave_swarm, stop_nephelios_stack};
+use crate::services::helpers::docker_helper::{check_swarm, deploy_nephelios_stack, init_swarm, leave_swarm, prune_images, stop_nephelios_stack};
 use std::env;
 use tokio::sync::broadcast;
 use warp::http::Method;
@@ -64,6 +64,13 @@ async fn main() {
 
     let ip_addr = _addr.ip();
 
+    println!("🚀 Pruning Docker images...");
+    let res_prune_images = prune_images().await;
+    match res_prune_images {
+        Ok(_) => println!("✅ Docker images pruned successfully"),
+        Err(e) => eprintln!("❌ Failed to prune Docker images: {}", e)
+    }
+
     println!("🚀 Check if Docker Swarm is initialized...");
     let is_alive = check_swarm();
     match is_alive {
@@ -120,6 +127,13 @@ async fn main() {
             Ok(_) => println!("✅ Left Docker Swarm successfully"),
             Err(e) => eprintln!("❌ Failed to leave Docker Swarm: {}", e)
         }
+    }
+
+    println!("🛑 Pruning Docker images...");
+    let res_prune_images = prune_images().await;
+    match res_prune_images {
+        Ok(_) => println!("✅ Docker images pruned successfully"),
+        Err(e) => eprintln!("❌ Failed to prune Docker images: {}", e)
     }
 
     println!("👋 Goodbye!");
