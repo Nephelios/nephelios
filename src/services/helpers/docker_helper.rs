@@ -103,35 +103,7 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
                     labels.get("com.myapp.domain"),
                     labels.get("com.myapp.created_at"),
                 ) {
-
-                    // Get container's state/status
-                    let mut is_running = false;
-                    let containers = docker
-                        .list_containers(Some(ListContainersOptions {
-                            filters: {
-                                let mut filters = HashMap::new();
-                                filters.insert("label".to_string(), vec![format!("com.myapp.name={}", name.clone())]);
-                                filters
-                            },
-                            ..Default::default()
-                        }))
-                        .await
-                        .map_err(|e| format!("Failed to list containers: {}", e))?;
-
-                    for container in containers {
-                        if let Some(state) = container.state {
-                            if state == "running" {
-                                is_running = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    let status = if is_running {
-                        "running".to_string()
-                    } else {
-                        "unknown".to_string()
-                    };
+                    let app_status = get_app_status(name.to_string()).await;
 
                     // Collect app info, handle Option<String> for container.id
                     apps.push(AppInfo {
@@ -140,7 +112,7 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
                         github_url: url.clone(),
                         domain: domain.clone(),
                         created_at: created.clone(),
-                        status,
+                        status: app_status,
                         container_id: Some(
                             service
                                 .id
@@ -157,6 +129,43 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
     apps.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
     Ok(apps)
+}
+
+pub async fn get_app_status(name: String) -> String {
+    let mut app_status: &str = "unknown";
+
+    if let Ok(res) = is_app_running(name).await {
+        if res {
+            app_status = "running";
+        }
+    }
+    app_status.to_string()
+}
+
+async fn is_app_running(name: String) -> Result<bool, String> {
+    let docker = Docker::connect_with_local_defaults()
+        .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
+
+    let containers = docker
+        .list_containers(Some(ListContainersOptions {
+            filters: {
+                let mut filters = HashMap::new();
+                filters.insert("label".to_string(), vec![format!("com.myapp.name={}", name.clone())]);
+                filters
+            },
+            ..Default::default()
+        }))
+        .await
+        .map_err(|e| format!("Failed to list containers: {}", e))?;
+
+    for container in containers {
+        if let Some(state) = container.state {
+            if state == "running" {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 /// Creates a Docker context tarball for the specified application path.
