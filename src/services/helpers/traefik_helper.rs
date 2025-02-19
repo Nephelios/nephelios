@@ -16,7 +16,7 @@ use std::path::PathBuf;
 /// * `Ok(0)` if the application is not deployed.
 /// * `Err(String)` if there was an error during verification.
 pub fn verif_app(app: &str) -> io::Result<i32> {
-    let path = PathBuf::from("src/docker-compose.yml");
+    let path = PathBuf::from("./docker-compose.yml");
     let mut file = File::open(&path)?;
     let mut content = String::new();
     file.read_to_string(&mut content)?;
@@ -38,7 +38,7 @@ pub fn verif_app(app: &str) -> io::Result<i32> {
 /// * `Ok(())` if the application was successfully added.
 /// * `Err(String)` if there was an error during the addition.
 pub fn add_to_deploy(app: &str, port: &str, metadata: &AppMetadata) -> io::Result<()> {
-    let path = PathBuf::from("src/docker-compose.yml");
+    let path = PathBuf::from("./docker-compose.yml");
     let mut file = OpenOptions::new().append(true).create(true).open(path)?;
 
     let service = app;
@@ -54,7 +54,8 @@ pub fn add_to_deploy(app: &str, port: &str, metadata: &AppMetadata) -> io::Resul
         labels:
           - "traefik.enable=true"
           - "traefik.http.routers.{}.rule=Host(`{}.localhost`)"
-          - "traefik.http.routers.{}.entryPoints=web"
+          - "traefik.http.routers.{}.entrypoints=web,websecure"
+          - "traefik.http.routers.{}.tls.certresolver=myresolver"
           - "traefik.http.services.{}.loadbalancer.server.port={}"
           - "com.myapp.name={}"
           - "com.myapp.image={}:latest"
@@ -62,8 +63,11 @@ pub fn add_to_deploy(app: &str, port: &str, metadata: &AppMetadata) -> io::Resul
           - "com.myapp.github_url={}"
           - "com.myapp.domain={}"
           - "com.myapp.created_at={}"
+    networks:
+        - nephelios_overlay
+
 "#,
-        service, image, replicas, service, app, service, service, port, app, image, metadata.app_type, metadata.github_url, metadata.domain, metadata.created_at
+        service, image, replicas, service, app, service, service, service, port, app, image, metadata.app_type, metadata.github_url, metadata.domain, metadata.created_at
     );
 
     file.write_all(resultat.as_bytes())?;
@@ -87,7 +91,7 @@ pub fn add_to_deploy(app: &str, port: &str, metadata: &AppMetadata) -> io::Resul
 /// A `Result` indicating success or an I/O error.
 
 pub fn remove_app_compose(app_name: &str) -> io::Result<()> {
-    let path = PathBuf::from("src/docker-compose.yml");
+    let path = PathBuf::from("./docker-compose.yml");
     let content = fs::read_to_string(&path)?;
 
 

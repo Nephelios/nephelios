@@ -19,7 +19,7 @@ use std::process::Command;
 use tar::Builder;
 use walkdir::WalkDir;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AppMetadata {
     pub app_name: String,
     pub app_type: String,
@@ -414,7 +414,7 @@ pub async fn push_image(app_name: &str) -> Result<(), String> {
 /// * `Err(String)` if there was an error during execution.
 pub fn deploy_nephelios_stack() -> Result<(), String> {
     let status = Command::new("docker")
-        .current_dir("src")
+        .current_dir("./")
         .arg("stack")
         .arg("deploy")
         .arg("-c")
