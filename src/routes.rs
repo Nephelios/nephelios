@@ -171,6 +171,7 @@ async fn handle_create_app(
 ) -> Result<impl warp::Reply, warp::Rejection> {
 
     let _ = tokio::spawn(async move {
+
         let app_name = body
             .get("app_name")
             .and_then(Value::as_str)
@@ -182,7 +183,11 @@ async fn handle_create_app(
         let github_url = body.get("github_url").and_then(Value::as_str);
 
         if github_url.is_none() || github_url.unwrap().is_empty() {
-            send_deployment_status(&status_tx, app_name, "error", "GitHub URL is required").await;
+            send_deployment_status(&status_tx, app_name, "error", "GitHub URL is required", &AppMetadata::new(
+                app_name.to_string(),
+                app_type.to_string(),
+               "".to_string()
+            )).await;
             return Ok(warp::reply::with_status(
                 warp::reply::json(&json!({
                 "error": "GitHub URL is required"
@@ -191,15 +196,18 @@ async fn handle_create_app(
             ));
         }
 
+
         let github_url = github_url.unwrap();
+
         let metadata = AppMetadata::new(
             app_name.to_string(),
             app_type.to_string(),
             github_url.to_string(),
         );
 
+
         // Clone repository
-        send_deployment_status(&status_tx, app_name, "in_progress", "Cloning repository").await;
+        send_deployment_status(&status_tx, app_name, "in_progress", "Cloning repository", &metadata).await;
         let temp_dir = match create_temp_dir(app_name) {
             Ok(dir) => dir,
             Err(e) => {
@@ -207,7 +215,7 @@ async fn handle_create_app(
                     &status_tx,
                     app_name,
                     "error",
-                    &format!("Failed to create temp directory: {}", e),
+                    &format!("Failed to create temp directory: {}", e), &metadata
                 )
                     .await;
                 return Err(reject::custom(CustomError(format!(
@@ -220,7 +228,7 @@ async fn handle_create_app(
         let temp_dir_path = match temp_dir.to_str() {
             Some(path) => path,
             None => {
-                send_deployment_status(&status_tx, app_name, "error", "Invalid temp directory path")
+                send_deployment_status(&status_tx, app_name, "error", "Invalid temp directory path", &metadata)
                     .await;
                 return Err(reject::custom(CustomError(
                     "Temp directory path is invalid".to_string(),
@@ -234,7 +242,7 @@ async fn handle_create_app(
                 &status_tx,
                 app_name,
                 "error",
-                &format!("Failed to clone repository: {}", e),
+                &format!("Failed to clone repository: {}", e), &metadata
             )
                 .await;
             return Err(reject::custom(CustomError(format!(
@@ -250,7 +258,7 @@ async fn handle_create_app(
                 &status_tx,
                 app_name,
                 "error",
-                &format!("Failed to generate Dockerfile: {}", e),
+                &format!("Failed to generate Dockerfile: {}", e), &metadata
             )
                 .await;
             return Err(reject::custom(CustomError(format!(
@@ -259,17 +267,17 @@ async fn handle_create_app(
             ))));
         }
 
-        send_deployment_status(&status_tx, app_name, "success", "Cloning repository").await;
+        send_deployment_status(&status_tx, app_name, "success", "Cloning repository", &metadata).await;
 
         // Build Docker image
-        send_deployment_status(&status_tx, app_name, "in_progress", "Building Docker image").await;
+        send_deployment_status(&status_tx, app_name, "in_progress", "Building Docker image", &metadata).await;
         if let Err(e) = build_image(app_name, temp_dir_path, &metadata).await {
             let _ = remove_temp_dir(&temp_dir);
             send_deployment_status(
                 &status_tx,
                 app_name,
                 "error",
-                &format!("Failed to build Docker image: {}", e),
+                &format!("Failed to build Docker image: {}", e), &metadata
             )
                 .await;
             return Err(reject::custom(CustomError(format!(
@@ -278,7 +286,7 @@ async fn handle_create_app(
             ))));
         }
 
-        send_deployment_status(&status_tx, app_name, "success", "Building Docker image").await;
+        send_deployment_status(&status_tx, app_name, "success", "Building Docker image", &metadata).await;
 
         if let Err(e) = push_image(app_name).await {
             return Err(reject::custom(CustomError(format!(
@@ -287,7 +295,7 @@ async fn handle_create_app(
             ))));
         }
 
-        send_deployment_status(&status_tx, app_name, "in_progress", "Starting deployment").await;
+        send_deployment_status(&status_tx, app_name, "in_progress", "Starting deployment", &metadata).await;
         if let Ok(1) = verif_app(app_name) {
             if let Err(e) = deploy_nephelios_stack() {
                 let _ = remove_temp_dir(&temp_dir);
@@ -295,7 +303,7 @@ async fn handle_create_app(
                     &status_tx,
                     app_name,
                     "error",
-                    &format!("Failed to update deployment: {}", e),
+                    &format!("Failed to update deployment: {}", e), &metadata
                 )
                     .await;
                 return Err(reject::custom(CustomError(format!(
@@ -310,7 +318,7 @@ async fn handle_create_app(
                     &status_tx,
                     app_name,
                     "error",
-                    &format!("Failed to add app to deploy file: {}", e),
+                    &format!("Failed to add app to deploy file: {}", e),&metadata
                 )
                     .await;
                 return Err(reject::custom(CustomError(format!(
@@ -325,7 +333,7 @@ async fn handle_create_app(
                     &status_tx,
                     app_name,
                     "error",
-                    &format!("Failed to start deployment: {}", e),
+                    &format!("Failed to start deployment: {}", e), &metadata
                 )
                     .await;
                 return Err(reject::custom(CustomError(format!(
@@ -335,7 +343,7 @@ async fn handle_create_app(
             }
         }
 
-        send_deployment_status(&status_tx, app_name, "success", "Starting deployment").await;
+        send_deployment_status(&status_tx, app_name, "success", "Starting deployment", &metadata).await;
 
         if let Err(e) = remove_temp_dir(&temp_dir) {
             eprintln!("Warning: Failed to clean up temp directory: {}", e);

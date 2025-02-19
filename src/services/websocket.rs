@@ -7,6 +7,7 @@ use tokio::sync::mpsc;
 use warp::ws::{Message, WebSocket};
 use warp::Filter;
 
+use crate::services::helpers::docker_helper::AppMetadata;
 use futures_util::SinkExt;
 
 #[derive(Clone, Serialize)]
@@ -16,6 +17,7 @@ pub struct DeploymentStatus {
     step: String,
     #[serde(with = "chrono::serde::ts_milliseconds")]
     timestamp: DateTime<Utc>,
+    metadata: AppMetadata
 }
 
 pub type StatusSender = broadcast::Sender<DeploymentStatus>;
@@ -103,12 +105,14 @@ pub async fn send_deployment_status(
     app_name: &str,
     status: &str,
     step: &str,
+    metadata: &AppMetadata
 ) {
     let status_update = DeploymentStatus {
         app_name: app_name.to_string(),
         status: status.to_string(),
         step: step.to_string(),
         timestamp: chrono::Utc::now(),
+        metadata: metadata.clone()
     };
 
     if let Err(e) = sender.send(status_update) {
