@@ -34,7 +34,7 @@ pub fn remove_temp_dir(target_dir: &Path) -> Result<(), String> {
 pub fn create_temp_dir(app_name: &str) -> Result<PathBuf, String> {
     let home = home_dir().ok_or("Failed to find home directory")?;
 
-    let temp_dir = home.join(format!(".{}-tmp", app_name));
+    let temp_dir = home.join(format!(".cache/nephelios/.{}-tmp", app_name));
 
     fs::create_dir_all(&temp_dir).map_err(|e| format!("Failed to create temp directory: {}", e))?;
 
