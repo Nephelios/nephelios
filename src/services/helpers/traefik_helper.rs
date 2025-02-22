@@ -50,7 +50,15 @@ pub fn add_to_deploy(app: &str, port: &str, metadata: &AppMetadata) -> io::Resul
         r#"  {}:
     image: localhost:5000/{}:latest
     deploy:
+        mode: replicated
         replicas: {}
+        resources:
+            limits:
+                cpus: "1.5"      # Maximum 1.5 CPU cores
+                memory: 1G       # Maximum 1GB RAM
+            reservations:
+                cpus: "0.5"      # Reserve at least 0.5 CPU cores
+                memory: 256M     # Reserve at least 256MB RAM
         labels:
           - "traefik.enable=true"
           - "traefik.http.routers.{}.rule=Host(`{}.localhost`)"
