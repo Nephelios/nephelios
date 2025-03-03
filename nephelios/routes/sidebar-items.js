@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["create_app_route","get_apps_route","handle_create_app","handle_get_apps","handle_remove_app","health_check_route","remove_app_route"],"struct":["CustomError"]};
