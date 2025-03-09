@@ -1,26 +1,25 @@
-use bollard::container::RemoveContainerOptions;
+use bollard::auth::DockerCredentials;
 use bollard::container::{ListContainersOptions, StopContainerOptions};
-use bollard::image::BuildImageOptions;
+use bollard::image::{BuildImageOptions, PruneImagesOptions, PushImageOptions, TagImageOptions};
+use bollard::service::{InspectServiceOptions, ListServicesOptions};
 use bollard::Docker;
 use chrono::Utc;
 use dirs::home_dir;
 use futures_util::stream::StreamExt;
+use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::fs::File;
-use std::io::Write;
+use std::io::{Read, Write};
+use std::net::IpAddr;
 use std::path::Path;
 use std::process::Command;
 use tar::Builder;
-use tokio::fs::File as TokioFile;
-use tokio_util::codec::{BytesCodec, FramedRead};
 use walkdir::WalkDir;
-use warp::hyper::body::to_bytes;
-use warp::hyper::Body;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AppMetadata {
     pub app_name: String,
     pub app_type: String,
@@ -71,54 +70,57 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
 
-    let container_filters: HashMap<String, Vec<String>> = HashMap::new();
-    let container_options = ListContainersOptions {
-        all: true,
-        filters: container_filters,
-        ..Default::default()
-    };
+    let filters: HashMap<String, Vec<String>> = HashMap::new();
 
-    let containers = docker
-        .list_containers(Some(container_options))
+    let options = Some(ListServicesOptions{
+        filters,
+        ..Default::default()
+    });
+
+    let services = docker
+        .list_services(options)
         .await
-        .map_err(|e| format!("Failed to list containers: {}", e))?;
+        .map_err(|e| format!("Failed to list services: {}", e))?;
 
     let mut apps = Vec::new();
 
-    // Iterate over containers and check for custom labels
-    for container in containers {
-        if let Some(labels) = container.labels {
-            if let (Some(name), Some(app_type), Some(url), Some(domain), Some(created)) = (
-                labels.get("com.myapp.name"),
-                labels.get("com.myapp.type"),
-                labels.get("com.myapp.github_url"),
-                labels.get("com.myapp.domain"),
-                labels.get("com.myapp.created_at"),
-            ) {
-                // Get container's state/status
-                let status = match container.state {
-                    Some(ref state) => state.clone(),
-                    None => container
-                        .status
-                        .clone()
-                        .unwrap_or_else(|| "unknown".to_string()),
-                };
 
-                // Collect app info, handle Option<String> for container.id
-                apps.push(AppInfo {
-                    app_name: name.clone(),
-                    app_type: app_type.clone(),
-                    github_url: url.clone(),
-                    domain: domain.clone(),
-                    created_at: created.clone(),
-                    status,
-                    container_id: Some(
-                        container
-                            .id
-                            .clone()
-                            .unwrap_or_else(|| "unknown".to_string()),
-                    ),
-                });
+
+    let inspect_options = Some(InspectServiceOptions{
+        insert_defaults: true,
+    });
+
+
+    // Iterate over containers and check for custom labels
+    for service in services {
+        if let Some(spec) = docker.inspect_service(service.id.as_ref().unwrap(), inspect_options).await.unwrap().spec {
+            if let Some(labels) = spec.labels {
+
+                if let (Some(name), Some(app_type), Some(url), Some(domain), Some(created)) = (
+                    labels.get("com.myapp.name"),
+                    labels.get("com.myapp.type"),
+                    labels.get("com.myapp.github_url"),
+                    labels.get("com.myapp.domain"),
+                    labels.get("com.myapp.created_at"),
+                ) {
+                    let app_status = get_app_status(name.to_string()).await;
+
+                    // Collect app info, handle Option<String> for container.id
+                    apps.push(AppInfo {
+                        app_name: name.clone(),
+                        app_type: app_type.clone(),
+                        github_url: url.clone(),
+                        domain: domain.clone(),
+                        created_at: created.clone(),
+                        status: app_status,
+                        container_id: Some(
+                            service
+                                .id
+                                .clone()
+                                .unwrap_or_else(|| "unknown".to_string()),
+                        ),
+                    });
+                }
             }
         }
     }
@@ -129,6 +131,43 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
     Ok(apps)
 }
 
+pub async fn get_app_status(name: String) -> String {
+    let mut app_status: &str = "unknown";
+
+    if let Ok(res) = is_app_running(name).await {
+        if res {
+            app_status = "running";
+        }
+    }
+    app_status.to_string()
+}
+
+async fn is_app_running(name: String) -> Result<bool, String> {
+    let docker = Docker::connect_with_local_defaults()
+        .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
+
+    let containers = docker
+        .list_containers(Some(ListContainersOptions {
+            filters: {
+                let mut filters = HashMap::new();
+                filters.insert("label".to_string(), vec![format!("com.myapp.name={}", name.clone())]);
+                filters
+            },
+            ..Default::default()
+        }))
+        .await
+        .map_err(|e| format!("Failed to list containers: {}", e))?;
+
+    for container in containers {
+        if let Some(state) = container.state {
+            if state == "running" {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 /// Creates a Docker context tarball for the specified application path.
 ///
 /// # Arguments
@@ -137,7 +176,7 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
 /// # Returns
 /// * `Ok(String)` containing the path to the created tarball.
 /// * `Err(String)` if there is an error.
-fn create_docker_context(app_path: &str) -> Result<String, String> {
+fn create_docker_context(app_name: &str, app_path: &str) -> Result<String, String> {
     let app_dir = Path::new(app_path)
         .canonicalize()
         .map_err(|e| format!("Invalid application path: {}", e))?;
@@ -148,8 +187,8 @@ fn create_docker_context(app_path: &str) -> Result<String, String> {
 
     let home = home_dir().ok_or("Failed to find home directory")?;
     let tar_path = home.join(format!(
-        "{}.tar",
-        app_dir.file_name().unwrap().to_string_lossy()
+        ".cache/nephelios/{}.tar",
+        app_name
     ));
 
     let tar_file =
@@ -270,32 +309,37 @@ pub async fn build_image(
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
 
-    let tar_path = create_docker_context(app_path).map_err(|e| format!("Error: {}", e))?;
-    let tar_file = TokioFile::open(&tar_path)
-        .await
+    let tar_path = create_docker_context(app_name, app_path).map_err(|e| format!("Error: {}", e))?;
+    let mut tar_file = File::open(&tar_path)
         .map_err(|e| format!("Failed to open tar file: {}", e))?;
 
-    let tar_stream =
-        FramedRead::new(tar_file, BytesCodec::new()).map(|res| res.map(|b| b.freeze()));
-    let body = Body::wrap_stream(tar_stream);
-
-    let body_bytes = to_bytes(body)
-        .await
-        .map_err(|e| format!("Failed to convert Body to Bytes: {}", e))?;
+    let mut contents = Vec::new();
+    tar_file.read_to_end(&mut contents)
+        .map_err(|e| format!("Failed to read tar file: {}", e))?;
 
     let options = BuildImageOptions {
-        t: app_name.to_lowercase(),
+        t: format!("localhost:5000/{}:latest",app_name.to_lowercase()),
         rm: true,
         labels: metadata.to_labels(),
         ..Default::default()
     };
 
-    let mut build_stream = docker.build_image(options, None, Some(body_bytes));
+    let mut build_stream = docker.build_image(options, None, Some(contents.into()));
 
-    while let Some(log) = build_stream.next().await {
-        match log {
-            Ok(output) => println!("{:?}", output),
-            Err(e) => return Err(format!("Docker build failed: {}", e)),
+    while let Some(build_result) = build_stream.next().await {
+        match build_result {
+
+            Ok(output) => {
+                if let Some(stream) = output.stream {
+                    println!("Build Info: {}", stream);
+                }
+                if let Some(error) = output.error {
+                    eprintln!("Error: {}", error);
+                }
+            }
+            Err(e) => {
+                eprintln!("Error during build: {}", e);
+            }
         }
     }
 
@@ -303,6 +347,66 @@ pub async fn build_image(
         eprintln!("Warning: Failed to clean up tar file: {}", e);
     } else {
         println!("Successfully cleaned up tar file: {}", tar_path);
+    }
+
+    Ok(())
+}
+/// Pushes a Docker image to a remote registry.
+///
+/// # Arguments
+///
+/// * `app_name` - The name of the Docker image to push.
+///
+/// # Returns
+///
+/// * `Ok(())` if the image was successfully pushed.
+/// * `Err(String)` if there was an error during the push process.
+pub async fn push_image(app_name: &str) -> Result<(), String> {
+    let docker = Docker::connect_with_local_defaults()
+        .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
+
+    // Nom de l'image locale
+    let local_image = format!("localhost:5000/{}:latest", app_name.to_lowercase());
+    // Nom de l'image avec le registre
+    let remote_image = format!("localhost:5000/{}:latest", app_name.to_lowercase());
+
+    // Taguer l'image pour le registre
+    let tag_options = TagImageOptions {
+        repo: remote_image.clone(),
+        tag: "latest".parse().unwrap(),
+    };
+    docker
+        .tag_image(&local_image, Some(tag_options))
+        .await
+        .map_err(|e| format!("Failed to tag image: {}", e))?;
+
+    // Pousser l'image vers le registre
+    let push_options = PushImageOptions {
+        tag: "latest",
+        ..Default::default()
+    };
+
+    // Si votre registre nécessite une authentification, fournissez les identifiants
+    let credentials = Some(DockerCredentials {
+        ..Default::default()
+    });
+
+    let mut push_stream = docker.push_image(&*remote_image, Some(push_options), credentials);
+
+    while let Some(push_stream) = push_stream.next().await {
+        match push_stream {
+            Ok(output) => {
+                if let Some(stream) = output.progress {
+                    println!("Push Image info: {}", stream);
+                }
+                if let Some(error) = output.error {
+                    eprintln!("Error: {}", error);
+                }
+            }
+            Err(e) => {
+                eprintln!("Error pushing image: {}", e);
+            }
+        }
     }
 
     Ok(())
@@ -317,12 +421,14 @@ pub async fn build_image(
 /// # Returns
 /// * `Ok(())` if the Docker Compose command was successful.
 /// * `Err(String)` if there was an error during execution.
-pub fn start_docker_compose() -> Result<(), String> {
+pub fn deploy_nephelios_stack() -> Result<(), String> {
     let status = Command::new("docker")
-        .current_dir("src")
-        .arg("compose")
-        .arg("up")
-        .arg("-d")
+        .current_dir("./")
+        .arg("stack")
+        .arg("deploy")
+        .arg("-c")
+        .arg("docker-compose.yml")
+        .arg("nephelios")
         .status()
         .map_err(|e| format!("Failed to execute docker compose: {}", e))?;
 
@@ -363,21 +469,155 @@ pub async fn stop_container(container_name: &str) -> Result<(), String> {
 ///
 /// # Arguments
 ///
-/// * `container_name` - The name of the container to remove.
+/// * `app_name` - The name of the container to remove.
 ///
 /// # Returns
-/// * `Ok(())` if successful.
-/// * `Err(String)` if an error occurs.
-pub async fn remove_container(container_name: &str) -> Result<(), String> {
+///
+/// A `Result` indicating success or an error message in case of failure.
+
+pub async fn remove_service(app_name: &str) -> Result<(), String> {
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
-    let options = Some(RemoveContainerOptions {
-        force: true,
-        ..Default::default()
-    });
+
+    let service_name: &str = &format!("nephelios_{}", app_name);
+
+    println!("Removing service: {}", service_name);
+
     docker
-        .remove_container(container_name, options)
+        .delete_service(service_name)
         .await
         .map_err(|e| format!("Failed to start container: {}", e))?;
+    Ok(())
+}
+
+/// Leaves the Docker Swarm.
+///
+/// Executes the `docker swarm leave -f` command to forcefully leave the Docker Swarm.
+///
+/// # Returns
+///
+/// * `Ok(())` if the command was successful.
+/// * `Err(String)` if there was an error during execution.
+pub fn leave_swarm() -> Result<(), String> {
+    let status = Command::new("docker")
+        .arg("swarm")
+        .arg("leave")
+        .arg("-f")
+        .status()
+        .map_err(|e| format!("Failed to execute leave swarm: {}", e))?;
+
+    if !status.success() {
+        return Err("Docker Compose command failed".to_string());
+    }
+
+    Ok(())
+}
+
+
+/// Stops the Nephelios stack by removing the Docker stack.
+///
+/// # Returns
+///
+/// * `Ok(())` if the stack was successfully stopped.
+/// * `Err(String)` if there was an error during the process.
+pub fn stop_nephelios_stack() -> Result<(), String> {
+
+    let status = Command::new("docker")
+        .arg("stack")
+        .arg("rm")
+        .arg("nephelios")
+        .status()
+        .map_err(|e| format!("Failed to execute remove Nephelios: {}", e))?;
+
+    if !status.success() {
+        return Err("Docker Compose command failed".to_string());
+    }
+
+    Ok(())
+}
+
+
+/// Initializes Docker Swarm with the given IP address.
+///
+/// # Arguments
+///
+/// * `ip_addr` - The IP address to advertise for the Docker Swarm.
+///
+/// # Returns
+///
+/// * `Ok(())` if the Docker Swarm was successfully initialized.
+/// * `Err(String)` if there was an error during initialization.
+pub fn init_swarm(ip_addr: IpAddr) -> Result<(), String> {
+    let addr_parameter = format!("--advertise-addr={}", env::var("ADVERTISE_ADDR").unwrap_or_else(|_| {
+        // Specify a default IP address if ADVERTISE_ADDR is not set
+        ip_addr.to_string()
+    }));
+
+    println!("Init swarm with address: {}", addr_parameter);
+    let status = Command::new("docker")
+        .arg("swarm")
+        .arg("init")
+        .arg(addr_parameter)
+        .status()
+        .map_err(|e| format!("Failed to execute init swarm: {}", e))?;
+
+    if !status.success() {
+        return Err("Docker Compose command failed".to_string());
+    }
+
+    Ok(())
+}
+
+/// Checks if Docker Swarm is active.
+///
+/// Executes the `docker info` command and checks the output for the presence of "Swarm: active".
+///
+/// # Returns
+///
+/// * `Ok(true)` if Docker Swarm is active.
+/// * `Ok(false)` if Docker Swarm is not active.
+/// * `Err(String)` if there was an error during execution.
+pub fn check_swarm() -> Result<bool, String> {
+    let swarm_info = Command::new("docker")
+        .arg("info")
+        .output()
+        .map_err(|e| format!("Failed to execute docker info: {}", e))?;
+
+    Ok(String::from_utf8_lossy(&swarm_info.stdout).contains("Swarm: active"))
+}
+/// Prunes unused Docker images.
+///
+/// Connects to the local Docker daemon and removes all dangling images.
+///
+/// # Returns
+///
+/// * `Ok(())` if the images were successfully pruned.
+/// * `Err(String)` if there was an error during the pruning process.
+pub async fn prune_images() -> Result<(), String> {
+    let docker = Docker::connect_with_local_defaults()
+        .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
+
+    let filters: HashMap<String, Vec<String>> = HashMap::new();
+    let options = Some(PruneImagesOptions {
+        filters
+    });
+
+    let result = docker
+        .prune_images(options)
+        .await
+        .map_err(|e| format!("Failed to prune images: {}", e))?;
+
+    match &result.images_deleted {
+        None => println!("No images deleted"),
+        Some(images_deleted) => {
+            for image in images_deleted {
+                match &image.deleted {
+                    None => {}
+                    Some(deleted) => println!("Deleted image: {}", deleted)
+                }
+            }
+        }
+    }
+
     Ok(())
 }

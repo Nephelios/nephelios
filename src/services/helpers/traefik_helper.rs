@@ -1,10 +1,9 @@
-use std::fs::File;
+use crate::services::helpers::docker_helper::AppMetadata;
 use std::fs;
+use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
-
-
 
 /// Verifies if the application is already deployed.
 ///
@@ -17,7 +16,7 @@ use std::path::PathBuf;
 /// * `Ok(0)` if the application is not deployed.
 /// * `Err(String)` if there was an error during verification.
 pub fn verif_app(app: &str) -> io::Result<i32> {
-    let path = PathBuf::from("src/docker-compose.yml");
+    let path = PathBuf::from("./docker-compose.yml");
     let mut file = File::open(&path)?;
     let mut content = String::new();
     file.read_to_string(&mut content)?;
@@ -38,33 +37,45 @@ pub fn verif_app(app: &str) -> io::Result<i32> {
 /// # Returns
 /// * `Ok(())` if the application was successfully added.
 /// * `Err(String)` if there was an error during the addition.
-pub fn add_to_deploy(app: &str, port: &str) -> io::Result<()> {
-    let path = PathBuf::from("src/docker-compose.yml");
+pub fn add_to_deploy(app: &str, port: &str, metadata: &AppMetadata) -> io::Result<()> {
+    let path = PathBuf::from("./docker-compose.yml");
     let mut file = OpenOptions::new().append(true).create(true).open(path)?;
 
     let service = app;
-    let container_name = app;
     let image = app;
-    let label = "labels";
+    let replicas = 1;
     let app = app;
     let port = port;
     let resultat = format!(
-        r#"
-  {}:
-    image: {}:latest
-    container_name: {}
-    {}:
-      - "traefik.enable=true"
-      - "traefik.http.routers.{}.rule=Host(`{}.localhost`)"
-      - "traefik.http.routers.{}.entryPoints=websecure"
-      - "traefik.http.routers.{}.tls=true"
-      - "traefik.http.services.{}.loadbalancer.server.port={}"
+        r#"  {}:
+    image: localhost:5000/{}:latest
+    deploy:
+        mode: replicated
+        replicas: {}
+        resources:
+            limits:
+                cpus: "1.5"      # Maximum 1.5 CPU cores
+                memory: 1G       # Maximum 1GB RAM
+            reservations:
+                cpus: "0.5"      # Reserve at least 0.5 CPU cores
+                memory: 256M     # Reserve at least 256MB RAM
+        labels:
+          - "traefik.enable=true"
+          - "traefik.http.routers.{}.rule=Host(`{}.localhost`)"
+          - "traefik.http.routers.{}.entrypoints=web,websecure"
+          - "traefik.http.routers.{}.tls.certresolver=myresolver"
+          - "traefik.http.services.{}.loadbalancer.server.port={}"
+          - "com.myapp.name={}"
+          - "com.myapp.image={}:latest"
+          - "com.myapp.type={}"
+          - "com.myapp.github_url={}"
+          - "com.myapp.domain={}"
+          - "com.myapp.created_at={}"
     networks:
-      - traefik-global-proxy
-     
-    
+        - nephelios_overlay
+
 "#,
-        service, image, container_name, label, service, app, service, service, service, port
+        service, image, replicas, service, app, service, service, service, port, app, image, metadata.app_type, metadata.github_url, metadata.domain, metadata.created_at
     );
 
     file.write_all(resultat.as_bytes())?;
@@ -88,7 +99,7 @@ pub fn add_to_deploy(app: &str, port: &str) -> io::Result<()> {
 /// A `Result` indicating success or an I/O error.
 
 pub fn remove_app_compose(app_name: &str) -> io::Result<()> {
-    let path = PathBuf::from("src/docker-compose.yml");
+    let path = PathBuf::from("./docker-compose.yml");
     let content = fs::read_to_string(&path)?;
 
 
