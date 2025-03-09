@@ -621,3 +621,22 @@ pub async fn prune_images() -> Result<(), String> {
 
     Ok(())
 }
+
+
+pub async fn scale_app(app_name: &str, id: &str) -> Result<(), String> {
+    let scale_arg = format!("nephelios_{}={}", app_name,id); // Concaténer le nom et "=0"
+
+    let status = Command::new("docker")
+        .current_dir("./")
+        .arg("service")
+        .arg("scale")
+        .arg(&scale_arg) // Passer l'argument correctement
+        .status()
+        .map_err(|e| format!("Failed to execute docker command: {}", e))?;
+
+    if !status.success() {
+        return Err("Docker service scale command failed".to_string());
+    }
+
+    Ok(())
+}

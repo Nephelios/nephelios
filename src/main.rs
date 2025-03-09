@@ -1,7 +1,7 @@
 mod routes;
 mod services;
 
-use crate::routes::{create_app_route, get_apps_route, health_check_route, remove_app_route};
+use crate::routes::{create_app_route, get_apps_route, health_check_route, remove_app_route, stop_app_route,start_app_route};
 use crate::services::websocket::ws_route;
 
 use crate::services::helpers::docker_helper::{check_swarm, deploy_nephelios_stack, init_swarm, leave_swarm, prune_images, stop_nephelios_stack};

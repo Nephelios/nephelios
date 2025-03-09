@@ -43,3 +43,32 @@ services:
           - node.role == manager
     networks:
         - nephelios_overlay
+
+
+  boilerplate:
+    image: localhost:5000/boilerplate:latest
+    deploy:
+        mode: replicated
+        replicas: 1
+        resources:
+            limits:
+                cpus: "1.5"      # Maximum 1.5 CPU cores
+                memory: 1G       # Maximum 1GB RAM
+            reservations:
+                cpus: "0.5"      # Reserve at least 0.5 CPU cores
+                memory: 256M     # Reserve at least 256MB RAM
+        labels:
+          - "traefik.enable=true"
+          - "traefik.http.routers.boilerplate.rule=Host(`boilerplate.localhost`)"
+          - "traefik.http.routers.boilerplate.entrypoints=web,websecure"
+          - "traefik.http.routers.boilerplate.tls.certresolver=myresolver"
+          - "traefik.http.services.boilerplate.loadbalancer.server.port=3000"
+          - "com.myapp.name=boilerplate"
+          - "com.myapp.image=boilerplate:latest"
+          - "com.myapp.type=nodejs"
+          - "com.myapp.github_url=https://github.com/react-examples-projects/react-layout-template"
+          - "com.myapp.domain=boilerplate.localhost"
+          - "com.myapp.created_at=2025-03-09T17:56:58.743986390+00:00"
+    networks:
+        - nephelios_overlay
+

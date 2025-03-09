@@ -1,7 +1,7 @@
 use crate::services::helpers::traefik_helper::{add_to_deploy, verif_app};
 use futures_util::TryFutureExt;
 
-use crate::services::helpers::docker_helper::{build_image, deploy_nephelios_stack, generate_and_write_dockerfile, get_app_status, list_deployed_apps, prune_images, push_image, remove_service, AppMetadata};
+use crate::services::helpers::docker_helper::{build_image, deploy_nephelios_stack, generate_and_write_dockerfile, get_app_status, list_deployed_apps, prune_images, push_image, remove_service, scale_app, AppMetadata};
 
 use crate::services::helpers::traefik_helper::remove_app_compose;
 
@@ -91,39 +91,6 @@ pub fn start_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     .boxed()
 }
 
-
-/// Creates the route for stopping an app.
-///
-/// This route listens for POST requests at the `/stop` path and expects a JSON body.
-/// The JSON body should contain the following key:
-/// - `app_name`: The name of the application (default: "default-app").
-///
-/// Returns a boxed Warp filter that handles app stop requests.
-
-pub fn stop_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
-    warp::post()
-    .and(warp::path("stop"))
-    .and(warp::body::json()) // Expect a JSON body
-    .and_then(handle_stop_app)
-    .boxed()
-}
-
-/// Creates the route for starting an app.
-///
-/// This route listens for POST requests at the `/start` path and expects a JSON body.
-/// The JSON body should contain the following key:
-/// - `app_name`: The name of the application (default: "default-app").
-///
-/// Returns a boxed Warp filter that handles app start requests.
-
-pub fn start_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
-    warp::post()
-    .and(warp::path("start"))
-    .and(warp::body::json()) // Expect a JSON body
-    .and_then(handle_start_app)
-    .boxed()
-}
-
 /// Creates the route for health checks.
 ///
 /// This route listens for GET requests at the `/health` path.
@@ -158,19 +125,17 @@ async fn handle_start_app(body: Value) -> Result<impl warp::Reply, warp::Rejecti
         .and_then(Value::as_str)
         .unwrap_or("default-app");
 
-    let _ = add_to_deploy(app_name, "3000").map_err(|e|{
-        warp::reject::custom(CustomError(format!(
-            "Failed to stop container for app {}: {}",
-            app_name, e
-        )))
-    })?;
+    let scale = body
+        .get("scale")
+        .and_then(Value::as_str)
+        .unwrap_or("default-app");
 
-    let _ = start_docker_compose().map_err(|e|{
+    let _ = scale_app(app_name,scale).await.map_err(|e|{
         warp::reject::custom(CustomError(format!(
-            "Failed to stop container for app {}: {}",
+            "Failed to scale service for app {}: {}",
             app_name, e
         )))
-    })?;
+    });
 
     Ok(warp::reply::with_status(
         format!("start app: {}.", app_name),
@@ -199,19 +164,17 @@ async fn handle_stop_app(body: Value) -> Result<impl warp::Reply, warp::Rejectio
         .and_then(Value::as_str)
         .unwrap_or("default-app");
 
-    let _ = stop_container(app_name).await.map_err(|e|{
-        warp::reject::custom(CustomError(format!(
-            "Failed to stop container for app {}: {}",
-            app_name, e
-        )))
-    })?;
+    let scale = body
+        .get("scale")
+        .and_then(Value::as_str)
+        .unwrap_or("default-app");
 
-    let _ = remove_app_compose(app_name).map_err(|e|{
+    let _ = scale_app(app_name,scale).await.map_err(|e|{
         warp::reject::custom(CustomError(format!(
-            "Failed to remove app compose for app {}: {}",
+            "Failed to scale service for app {}: {}",
             app_name, e
         )))
-    })?;
+    });
 
     Ok(warp::reply::with_status(
         format!("stop app: {}.", app_name),
