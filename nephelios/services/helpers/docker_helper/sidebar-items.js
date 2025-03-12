@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["build_image","check_swarm","create_docker_context","deploy_nephelios_stack","generate_and_write_dockerfile","get_app_status","init_swarm","is_app_running","leave_swarm","list_deployed_apps","prune_images","push_image","remove_service","scale_app","stop_nephelios_stack"],"struct":["AppInfo","AppMetadata"]};
