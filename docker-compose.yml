@@ -43,3 +43,30 @@ services:
           - node.role == manager
     networks:
         - nephelios_overlay
+  jorsilegroson:
+    image: localhost:5000/jorsilegroson:latest
+    deploy:
+        mode: replicated
+        replicas: 1
+        resources:
+            limits:
+                cpus: "1.5"      # Maximum 1.5 CPU cores
+                memory: 1G       # Maximum 1GB RAM
+            reservations:
+                cpus: "0.5"      # Reserve at least 0.5 CPU cores
+                memory: 256M     # Reserve at least 256MB RAM
+        labels:
+          - "traefik.enable=true"
+          - "traefik.http.routers.jorsilegroson.rule=Host(`jorsilegroson.localhost`)"
+          - "traefik.http.routers.jorsilegroson.entrypoints=web,websecure"
+          - "traefik.http.routers.jorsilegroson.tls.certresolver=myresolver"
+          - "traefik.http.services.jorsilegroson.loadbalancer.server.port=3000"
+          - "com.myapp.name=jorsilegroson"
+          - "com.myapp.image=jorsilegroson:latest"
+          - "com.myapp.type=nodejs"
+          - "com.myapp.github_url=https://github.com/Adrinlol/landy-react-template"
+          - "com.myapp.domain=jorsilegroson.localhost"
+          - "com.myapp.created_at=2025-03-12T15:34:07.601190892+00:00"
+    networks:
+        - nephelios_overlay
+
