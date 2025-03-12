@@ -108,7 +108,7 @@ pub fn health_check_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
 /// Handles the app start logic.
 ///
 /// Extracts `app_name` from the JSON body and performs the necessary steps to start the app:
-/// adding the app to the deployment list and starting the Docker Compose process.
+/// adding the app to the deployment list and scaling the service to 1.
 ///
 /// # Arguments
 ///
@@ -125,10 +125,7 @@ async fn handle_start_app(body: Value) -> Result<impl warp::Reply, warp::Rejecti
         .and_then(Value::as_str)
         .unwrap_or("default-app");
 
-    let scale = body
-        .get("scale")
-        .and_then(Value::as_str)
-        .unwrap_or("default-app");
+    let scale: &str = "1";  
 
     let _ = scale_app(app_name,scale).await.map_err(|e|{
         warp::reject::custom(CustomError(format!(
@@ -147,7 +144,7 @@ async fn handle_start_app(body: Value) -> Result<impl warp::Reply, warp::Rejecti
 /// Handles the app stop logic.
 ///
 /// Extracts `app_name` from the JSON body and performs the necessary steps to stop the app:
-/// stopping the running container and deleting the associated compose file.
+/// stopping the running service and scaling this serving to 0.
 ///
 /// # Arguments
 ///
@@ -164,12 +161,9 @@ async fn handle_stop_app(body: Value) -> Result<impl warp::Reply, warp::Rejectio
         .and_then(Value::as_str)
         .unwrap_or("default-app");
 
-    let scale = body
-        .get("scale")
-        .and_then(Value::as_str)
-        .unwrap_or("default-app");
+    let scale: &str = "0"; 
 
-    let _ = scale_app(app_name,scale).await.map_err(|e|{
+    let _ = scale_app(app_name, scale).await.map_err(|e|{
         warp::reject::custom(CustomError(format!(
             "Failed to scale service for app {}: {}",
             app_name, e
@@ -201,15 +195,6 @@ async fn handle_remove_app(body: Value) -> Result<impl warp::Reply, warp::Reject
         .get("app_name")
         .and_then(Value::as_str)
         .unwrap_or("default-app");
-
-    /** @deprecated
-    let _ = stop_container(app_name).await.map_err(|e| {
-        warp::reject::custom(CustomError(format!(
-            "Failed to stop container for app {}: {}",
-            app_name, e
-        )))
-    })?;
-    **/
 
     let _ = remove_service(app_name).await.map_err(|e| {
         warp::reject::custom(CustomError(format!(

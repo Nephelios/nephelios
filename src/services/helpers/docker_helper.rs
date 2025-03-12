@@ -439,29 +439,6 @@ pub fn deploy_nephelios_stack() -> Result<(), String> {
     Ok(())
 }
 
-/// Stops the running container for the given application.
-///
-/// Executes the `docker stop` command to stop the container with the given name.
-///
-/// # Arguments
-///
-/// * `container_name` - The name of the container to stop.
-///
-/// # Returns
-///
-/// A `Result` indicating success or an error message in case of failure.
-
-pub async fn stop_container(container_name: &str) -> Result<(), String> {
-    let docker = Docker::connect_with_local_defaults()
-        .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
-    let options = Some(StopContainerOptions { t: 30 });
-    docker
-        .stop_container(container_name, options)
-        .await
-        .map_err(|e| format!("Failed to start container: {}", e))?;
-
-    Ok(())
-}
 
 /// Removes the container for the given application.
 ///
@@ -622,6 +599,27 @@ pub async fn prune_images() -> Result<(), String> {
     Ok(())
 }
 
+
+/// Scales a Docker service.
+///
+/// This function modifies the number of replicas for a given Docker service by executing  
+/// the `docker service scale` command. The service name is dynamically constructed using  
+/// the provided application name and identifier.
+///
+/// # Arguments
+///
+/// * `app_name` - A string slice that represents the application name.
+/// * `id` - A string slice that represents the identifier used to scale the service.
+///
+/// # Returns
+///
+/// * `Ok(())` if the scaling operation was successful.
+/// * `Err(String)` if there was an error executing the Docker command.
+///
+/// # Errors
+///
+/// This function returns an error if the `docker` command fails to execute  
+/// or if the scaling operation does not complete successfully.
 
 pub async fn scale_app(app_name: &str, id: &str) -> Result<(), String> {
     let scale_arg = format!("nephelios_{}={}", app_name,id); // Concaténer le nom et "=0"
