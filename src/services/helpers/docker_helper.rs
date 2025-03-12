@@ -72,7 +72,7 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
 
     let filters: HashMap<String, Vec<String>> = HashMap::new();
 
-    let options = Some(ListServicesOptions{
+    let options = Some(ListServicesOptions {
         filters,
         ..Default::default()
     });
@@ -84,18 +84,19 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
 
     let mut apps = Vec::new();
 
-
-
-    let inspect_options = Some(InspectServiceOptions{
+    let inspect_options = Some(InspectServiceOptions {
         insert_defaults: true,
     });
 
-
     // Iterate over containers and check for custom labels
     for service in services {
-        if let Some(spec) = docker.inspect_service(service.id.as_ref().unwrap(), inspect_options).await.unwrap().spec {
+        if let Some(spec) = docker
+            .inspect_service(service.id.as_ref().unwrap(), inspect_options)
+            .await
+            .unwrap()
+            .spec
+        {
             if let Some(labels) = spec.labels {
-
                 if let (Some(name), Some(app_type), Some(url), Some(domain), Some(created)) = (
                     labels.get("com.myapp.name"),
                     labels.get("com.myapp.type"),
@@ -114,10 +115,7 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
                         created_at: created.clone(),
                         status: app_status,
                         container_id: Some(
-                            service
-                                .id
-                                .clone()
-                                .unwrap_or_else(|| "unknown".to_string()),
+                            service.id.clone().unwrap_or_else(|| "unknown".to_string()),
                         ),
                     });
                 }
@@ -150,7 +148,10 @@ async fn is_app_running(name: String) -> Result<bool, String> {
         .list_containers(Some(ListContainersOptions {
             filters: {
                 let mut filters = HashMap::new();
-                filters.insert("label".to_string(), vec![format!("com.myapp.name={}", name.clone())]);
+                filters.insert(
+                    "label".to_string(),
+                    vec![format!("com.myapp.name={}", name.clone())],
+                );
                 filters
             },
             ..Default::default()
@@ -186,10 +187,7 @@ fn create_docker_context(app_name: &str, app_path: &str) -> Result<String, Strin
     }
 
     let home = home_dir().ok_or("Failed to find home directory")?;
-    let tar_path = home.join(format!(
-        ".cache/nephelios/{}.tar",
-        app_name
-    ));
+    let tar_path = home.join(format!(".cache/nephelios/{}.tar", app_name));
 
     let tar_file =
         fs::File::create(&tar_path).map_err(|e| format!("Failed to create tar file: {}", e))?;
@@ -236,16 +234,20 @@ pub fn generate_and_write_dockerfile(
     app_type: &str,
     app_path: &str,
     metadata: &AppMetadata,
+    start_command: &str,
+    install_command: &str,
+    additional_inputs: Option<&HashMap<String, String>>,
 ) -> Result<(), String> {
+    let additional_inputs = additional_inputs.as_ref();
     let dockerfile_path = Path::new(app_path).join("Dockerfile");
 
+    print!("start_command: {}", start_command);
     if dockerfile_path.exists() {
         println!("Dockerfile already exists at {}", dockerfile_path.display());
         return Ok(());
     }
 
-    let deploy_port: String =
-        env::var("NEPHELIOS_APPS_PORT").unwrap_or_else(|_| "3000".to_string());
+    let deploy_port = env::var("NEPHELIOS_APPS_PORT").unwrap_or_else(|_| "3000".to_string());
 
     let labels = metadata
         .to_labels()
@@ -254,37 +256,65 @@ pub fn generate_and_write_dockerfile(
         .collect::<Vec<_>>()
         .join("\n");
 
+    let env_vars = if let Some(inputs) = additional_inputs {
+        inputs
+            .iter()
+            .map(|(k, v)| format!("ENV {}=\"{}\"", k, v))
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        String::new()
+    };
+
+    let base_image = if install_command.contains("bun install") {
+        "oven/bun:latest"
+    } else {
+        "node:18-alpine"
+    };
+
     let dockerfile_content = match app_type {
         "nodejs" => {
             format!(
-                r#"FROM oven/bun:latest
+                r#"FROM {base_image}
 WORKDIR /app
-{}
-COPY package.json ./
-RUN bun install --production
+{labels}
+{env_vars}
+COPY package.json package-lock.json* pnpm-lock.yaml* yarn.lock* bun.lockb* ./
+RUN {install_command}
 COPY . .
-EXPOSE {}
-CMD ["sh", "-c", "if bun dev 2>/dev/null; then bun dev; else bun start; fi"]"#,
-                labels, deploy_port
+EXPOSE {deploy_port}
+CMD ["sh", "-c", "{start_command}"]"#,
+                base_image = base_image,
+                labels = labels,
+                env_vars = env_vars,
+                install_command = install_command,
+                deploy_port = deploy_port,
+                start_command = start_command
             )
         }
         "python" => {
             format!(
                 r#"FROM python:3.8-slim
 WORKDIR /app
-{}
+{labels}
+{env_vars}
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN {install_command}
 COPY . .
-EXPOSE {}
-CMD ["python", "app.py"]"#,
-                labels, deploy_port
+EXPOSE {deploy_port}
+CMD ["sh", "-c", "{start_command}"]"#,
+                labels = labels,
+                env_vars = env_vars,
+                install_command = install_command,
+                deploy_port = deploy_port,
+                start_command = start_command
             )
         }
         _ => return Err(format!("Unsupported app type: {}", app_type)),
     };
 
     println!("Writing Dockerfile to {}", dockerfile_path.display());
+    println!("Dockerfile content: {}", dockerfile_content);
     let mut file = File::create(&dockerfile_path)
         .map_err(|e| format!("Failed to create Dockerfile: {}", e))?;
     file.write_all(dockerfile_content.as_bytes())
@@ -309,16 +339,18 @@ pub async fn build_image(
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
 
-    let tar_path = create_docker_context(app_name, app_path).map_err(|e| format!("Error: {}", e))?;
-    let mut tar_file = File::open(&tar_path)
-        .map_err(|e| format!("Failed to open tar file: {}", e))?;
+    let tar_path =
+        create_docker_context(app_name, app_path).map_err(|e| format!("Error: {}", e))?;
+    let mut tar_file =
+        File::open(&tar_path).map_err(|e| format!("Failed to open tar file: {}", e))?;
 
     let mut contents = Vec::new();
-    tar_file.read_to_end(&mut contents)
+    tar_file
+        .read_to_end(&mut contents)
         .map_err(|e| format!("Failed to read tar file: {}", e))?;
 
     let options = BuildImageOptions {
-        t: format!("localhost:5000/{}:latest",app_name.to_lowercase()),
+        t: format!("localhost:5000/{}:latest", app_name.to_lowercase()),
         rm: true,
         labels: metadata.to_labels(),
         ..Default::default()
@@ -328,7 +360,6 @@ pub async fn build_image(
 
     while let Some(build_result) = build_stream.next().await {
         match build_result {
-
             Ok(output) => {
                 if let Some(stream) = output.stream {
                     println!("Build Info: {}", stream);
@@ -439,7 +470,6 @@ pub fn deploy_nephelios_stack() -> Result<(), String> {
     Ok(())
 }
 
-
 /// Removes the container for the given application.
 ///
 /// Executes the `docker rm` command to remove the container with the given name.
@@ -490,7 +520,6 @@ pub fn leave_swarm() -> Result<(), String> {
     Ok(())
 }
 
-
 /// Stops the Nephelios stack by removing the Docker stack.
 ///
 /// # Returns
@@ -498,7 +527,6 @@ pub fn leave_swarm() -> Result<(), String> {
 /// * `Ok(())` if the stack was successfully stopped.
 /// * `Err(String)` if there was an error during the process.
 pub fn stop_nephelios_stack() -> Result<(), String> {
-
     let status = Command::new("docker")
         .arg("stack")
         .arg("rm")
@@ -513,7 +541,6 @@ pub fn stop_nephelios_stack() -> Result<(), String> {
     Ok(())
 }
 
-
 /// Initializes Docker Swarm with the given IP address.
 ///
 /// # Arguments
@@ -525,10 +552,13 @@ pub fn stop_nephelios_stack() -> Result<(), String> {
 /// * `Ok(())` if the Docker Swarm was successfully initialized.
 /// * `Err(String)` if there was an error during initialization.
 pub fn init_swarm(ip_addr: IpAddr) -> Result<(), String> {
-    let addr_parameter = format!("--advertise-addr={}", env::var("ADVERTISE_ADDR").unwrap_or_else(|_| {
-        // Specify a default IP address if ADVERTISE_ADDR is not set
-        ip_addr.to_string()
-    }));
+    let addr_parameter = format!(
+        "--advertise-addr={}",
+        env::var("ADVERTISE_ADDR").unwrap_or_else(|_| {
+            // Specify a default IP address if ADVERTISE_ADDR is not set
+            ip_addr.to_string()
+        })
+    );
 
     println!("Init swarm with address: {}", addr_parameter);
     let status = Command::new("docker")
@@ -575,9 +605,7 @@ pub async fn prune_images() -> Result<(), String> {
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
 
     let filters: HashMap<String, Vec<String>> = HashMap::new();
-    let options = Some(PruneImagesOptions {
-        filters
-    });
+    let options = Some(PruneImagesOptions { filters });
 
     let result = docker
         .prune_images(options)
@@ -590,7 +618,7 @@ pub async fn prune_images() -> Result<(), String> {
             for image in images_deleted {
                 match &image.deleted {
                     None => {}
-                    Some(deleted) => println!("Deleted image: {}", deleted)
+                    Some(deleted) => println!("Deleted image: {}", deleted),
                 }
             }
         }
@@ -598,7 +626,6 @@ pub async fn prune_images() -> Result<(), String> {
 
     Ok(())
 }
-
 
 /// Scales a Docker service.
 ///
@@ -622,7 +649,7 @@ pub async fn prune_images() -> Result<(), String> {
 /// or if the scaling operation does not complete successfully.
 
 pub async fn scale_app(app_name: &str, id: &str) -> Result<(), String> {
-    let scale_arg = format!("nephelios_{}={}", app_name,id); // Concaténer le nom et "=0"
+    let scale_arg = format!("nephelios_{}={}", app_name, id); // Concaténer le nom et "=0"
 
     let status = Command::new("docker")
         .current_dir("./")
