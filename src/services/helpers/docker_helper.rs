@@ -18,6 +18,8 @@ use std::path::Path;
 use std::process::Command;
 use tar::Builder;
 use walkdir::WalkDir;
+use prometheus::{Encoder, TextEncoder, GaugeVec, Registry};
+use crate::metrics::{REGISTRY, CONTAINER_CPU, CONTAINER_MEM};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AppMetadata {
@@ -637,4 +639,50 @@ pub async fn scale_app(app_name: &str, id: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+
+
+pub async fn update_metrics() -> Result<(), Box<dyn std::error::Error>> {
+    let output = std::process::Command::new("docker")
+        .arg("stats")
+        .arg("--no-stream")
+        .arg("--format")
+        .arg("{{json .}}")
+        .output()?; 
+
+    let stdout = String::from_utf8(output.stdout)?;
+    let lines = stdout.lines();
+
+    CONTAINER_CPU.reset();
+    CONTAINER_MEM.reset();
+
+    for line in lines {
+        let data: serde_json::Value = serde_json::from_str(line)?;
+        let name = data["Name"].as_str().unwrap_or("unknown");
+        let cpu = parse_percentage(data["CPUPerc"].as_str().unwrap_or("0%"));
+        let mem = parse_memory(data["MemUsage"].as_str().unwrap_or("0MiB / 0MiB"));
+
+        CONTAINER_CPU.with_label_values(&[name]).set(cpu);
+        CONTAINER_MEM.with_label_values(&[name]).set(mem);
+    }
+
+    Ok(())
+}
+
+
+fn parse_percentage(val: &str) -> f64 {
+    val.trim_end_matches('%').parse::<f64>().unwrap_or(0.0)
+}
+
+
+fn parse_memory(val: &str) -> f64 {
+    val.split('/')
+        .next()
+        .unwrap_or("0")
+        .trim()
+        .replace("MiB", "")
+        .replace("GiB", "")
+        .parse::<f64>()
+        .unwrap_or(0.0)
 }
