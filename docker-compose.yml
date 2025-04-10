@@ -52,6 +52,7 @@ services:
     image: prom/prometheus:latest
     volumes:
       - prometheus_data:/prometheus
+      - /var/run/docker.sock:/var/run/docker.sock
     configs:
       - source: prometheus_config
         target: /etc/prometheus/prometheus.yml
@@ -61,6 +62,15 @@ services:
       - nephelios_overlay
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+          
+    command:
+      - '--web.enable-lifecycle'
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
 
   grafana:
     image: grafana/grafana:8.4.3
@@ -78,30 +88,4 @@ configs:
   prometheus_config:
     external: true
 
-  hello:
-    image: localhost:5000/hello:latest
-    deploy:
-        mode: replicated
-        replicas: 1
-        resources:
-            limits:
-                cpus: "1.5"      # Maximum 1.5 CPU cores
-                memory: 1G       # Maximum 1GB RAM
-            reservations:
-                cpus: "0.5"      # Reserve at least 0.5 CPU cores
-                memory: 256M     # Reserve at least 256MB RAM
-        labels:
-          - "traefik.enable=true"
-          - "traefik.http.routers.hello.rule=Host(`hello.localhost`)"
-          - "traefik.http.routers.hello.entrypoints=web,websecure"
-          - "traefik.http.routers.hello.tls.certresolver=myresolver"
-          - "traefik.http.services.hello.loadbalancer.server.port=3000"
-          - "com.myapp.name=hello"
-          - "com.myapp.image=hello:latest"
-          - "com.myapp.type=nodejs"
-          - "com.myapp.github_url=https://github.com/Adrinlol/landy-react-template"
-          - "com.myapp.domain=hello.localhost"
-          - "com.myapp.created_at=2025-04-08T13:42:13.361600445+00:00"
-    networks:
-        - nephelios_overlay
 
