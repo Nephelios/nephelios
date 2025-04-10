@@ -4,9 +4,20 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - "**/*.md"
+      - "**/.gitignore"
+      - "**/.gitmodules"
+      - "**/.env**"
+  
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - "**/*.md"
+      - "**/.gitignore"
+      - "**/.gitmodules"
+      - "**/.env**"
 
 permissions:
   contents: write
