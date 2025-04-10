@@ -64,7 +64,7 @@ async fn main() {
 
     // Source : https://stackoverflow.com/a/71279547
     let (_addr, server) = warp::serve(api_routes)
-        .bind_with_graceful_shutdown(([127, 0, 0, 1], app_port), async {
+        .bind_with_graceful_shutdown(([0, 0, 0, 0], app_port), async {
             tokio::signal::ctrl_c().await.ok();
         });
 
