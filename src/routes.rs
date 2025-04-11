@@ -1,24 +1,17 @@
-use std::collections::HashMap;
-
-use crate::services::helpers::traefik_helper::{add_to_deploy, verif_app};
-use futures_util::TryFutureExt;
-
+use crate::metrics::REGISTRY;
 use crate::services::helpers::docker_helper::{
     build_image, deploy_nephelios_stack, generate_and_write_dockerfile, get_app_status,
-    list_deployed_apps, prune_images, push_image, remove_service, scale_app, update_metrics, AppMetadata,
+    list_deployed_apps, prune_images, push_image, remove_service, scale_app, update_metrics,
+    AppMetadata,
 };
-
-use crate::services::helpers::traefik_helper::remove_app_compose;
-
 use crate::services::helpers::github_helper::{clone_repo, create_temp_dir, remove_temp_dir};
+use crate::services::helpers::traefik_helper::{add_to_deploy, remove_app_compose, verif_app};
 use crate::services::websocket::{send_deployment_status, StatusSender};
+use prometheus::{Encoder, TextEncoder};
 use serde_json::json;
 use serde_json::Value;
+use std::collections::HashMap;
 use warp::{reject, Filter};
-use prometheus::{TextEncoder, Encoder};
-use crate::metrics::{REGISTRY};
-
-
 
 #[derive(Debug)]
 struct CustomError(String);
@@ -58,7 +51,6 @@ pub fn create_app_route(
 /// - `app_name`: The name of the application (default: "default-app").
 ///
 /// Returns a boxed Warp filter that handles app removal requests.
-
 pub fn remove_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     warp::post()
         .and(warp::path("remove"))
@@ -74,7 +66,6 @@ pub fn remove_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
 /// - `app_name`: The name of the application (default: "default-app").
 ///
 /// Returns a boxed Warp filter that handles app stop requests.
-
 pub fn stop_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     warp::post()
         .and(warp::path("stop"))
@@ -90,7 +81,6 @@ pub fn stop_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
 /// - `app_name`: The name of the application (default: "default-app").
 ///
 /// Returns a boxed Warp filter that handles app start requests.
-
 pub fn start_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     warp::post()
         .and(warp::path("start"))
@@ -105,7 +95,6 @@ pub fn start_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
 /// It is used to verify the server's status and returns a JSON response "OK".
 ///
 /// Returns a boxed Warp filter that handles health check requests.
-
 pub fn health_check_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     warp::get()
         .and(warp::path("health"))
@@ -113,8 +102,12 @@ pub fn health_check_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
         .boxed()
 }
 
-
-
+/// Creates the route for metrics.
+///
+/// This route listens for GET requests at the `/metrics` path.
+/// It is used to retrieve metrics from the server and returns a text response.
+///
+/// Returns a boxed Warp filter that handles metrics requests.
 pub fn create_metrics_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     warp::path("metrics")
         .and(warp::get())
@@ -122,7 +115,17 @@ pub fn create_metrics_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)>
         .boxed()
 }
 
-
+/// Handles the metrics request.
+///
+/// This function updates the metrics and returns a text response containing the metrics.
+///
+/// # Returns
+///
+/// A result containing a Warp reply or a Warp rejection.
+///
+/// # Errors
+///
+/// This function returns a Warp rejection if the metrics update fails.
 async fn handle_metrics() -> Result<impl warp::Reply, warp::Rejection> {
     if let Err(e) = update_metrics().await {
         eprintln!("Failed to update metrics: {}", e);
@@ -134,7 +137,11 @@ async fn handle_metrics() -> Result<impl warp::Reply, warp::Rejection> {
     encoder.encode(&metric_families, &mut buffer).unwrap();
 
     let response = String::from_utf8(buffer.clone()).unwrap();
-    Ok(warp::reply::with_header(response, "Content-Type", encoder.format_type()))
+    Ok(warp::reply::with_header(
+        response,
+        "Content-Type",
+        encoder.format_type(),
+    ))
 }
 
 /// Handles the app start logic.
@@ -149,7 +156,6 @@ async fn handle_metrics() -> Result<impl warp::Reply, warp::Rejection> {
 /// # Returns
 ///
 /// A result containing a Warp reply or a Warp rejection.
-
 async fn handle_start_app(body: Value) -> Result<impl warp::Reply, warp::Rejection> {
     let app_name = body
         .get("app_name")
@@ -183,7 +189,6 @@ async fn handle_start_app(body: Value) -> Result<impl warp::Reply, warp::Rejecti
 /// # Returns
 ///
 /// A result containing a Warp reply or a Warp rejection.
-
 async fn handle_stop_app(body: Value) -> Result<impl warp::Reply, warp::Rejection> {
     let app_name = body
         .get("app_name")
@@ -217,21 +222,20 @@ async fn handle_stop_app(body: Value) -> Result<impl warp::Reply, warp::Rejectio
 /// # Returns
 ///
 /// A result containing a Warp reply or a Warp rejection.
-
 async fn handle_remove_app(body: Value) -> Result<impl warp::Reply, warp::Rejection> {
     let app_name = body
         .get("app_name")
         .and_then(Value::as_str)
         .unwrap_or("default-app");
 
-    let _ = remove_service(app_name).await.map_err(|e| {
+    remove_service(app_name).await.map_err(|e| {
         warp::reject::custom(CustomError(format!(
             "Failed to remove container for app {}: {}",
             app_name, e
         )))
     })?;
 
-    let _ = remove_app_compose(app_name).map_err(|e| {
+    remove_app_compose(app_name).map_err(|e| {
         warp::reject::custom(CustomError(format!(
             "Failed to remove app compose file for app {}: {}",
             app_name, e
@@ -244,6 +248,12 @@ async fn handle_remove_app(body: Value) -> Result<impl warp::Reply, warp::Reject
     ))
 }
 
+/// Creates the route for listing deployed apps.
+///
+/// This route listens for GET requests at the `/get-apps` path.
+/// It is used to retrieve a list of deployed apps and returns a JSON response.
+///
+/// Returns a boxed Warp filter that handles app listing requests.
 pub fn get_apps_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     warp::get()
         .and(warp::path("get-apps"))
@@ -251,6 +261,17 @@ pub fn get_apps_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
         .boxed()
 }
 
+/// Handles the app listing request.
+///
+/// This function retrieves a list of deployed apps and returns a JSON response.
+///
+/// # Returns
+///
+/// A result containing a Warp reply or a Warp rejection.
+///
+/// # Errors
+///
+/// This function returns a Warp rejection if the app listing fails.
 pub async fn handle_get_apps() -> Result<impl warp::Reply, warp::Rejection> {
     match list_deployed_apps().await {
         Ok(apps) => {
@@ -293,7 +314,7 @@ async fn handle_create_app(
     body: Value,
     status_tx: StatusSender,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-    let _ = tokio::spawn(async move {
+    tokio::spawn(async move {
         let app_name = body
             .get("app_name")
             .and_then(Value::as_str)
@@ -332,7 +353,7 @@ async fn handle_create_app(
                     })
                     .collect::<HashMap<String, String>>()
             })
-            .unwrap_or_else(HashMap::new);
+            .unwrap_or_default();
 
         if github_url.is_none() || github_url.unwrap().is_empty() {
             send_deployment_status(

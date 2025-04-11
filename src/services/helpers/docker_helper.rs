@@ -1,14 +1,12 @@
-use crate::metrics::{CONTAINER_CPU, CONTAINER_MEM, REGISTRY};
+use crate::metrics::{CONTAINER_CPU, CONTAINER_MEM};
 use bollard::auth::DockerCredentials;
-use bollard::container::{ListContainersOptions, StopContainerOptions};
+use bollard::container::ListContainersOptions;
 use bollard::image::{BuildImageOptions, PruneImagesOptions, PushImageOptions, TagImageOptions};
 use bollard::service::{InspectServiceOptions, ListServicesOptions};
 use bollard::Docker;
 use chrono::Utc;
 use dirs::home_dir;
 use futures_util::stream::StreamExt;
-use futures_util::TryStreamExt;
-use prometheus::{Encoder, GaugeVec, Registry, TextEncoder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -274,7 +272,7 @@ pub fn generate_and_write_dockerfile(
                 .collect::<Vec<_>>()
                 .join("\n")
         })
-        .unwrap_or_else(|| "".to_string());
+        .unwrap_or_default();
 
     let dockerfile_content = match app_type {
         "nodejs" => {
@@ -507,17 +505,14 @@ pub async fn push_image(app_name: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to tag image: {}", e))?;
 
     // Pousser l'image vers le registre
-    let push_options = PushImageOptions {
-        tag: "latest",
-        ..Default::default()
-    };
+    let push_options = PushImageOptions { tag: "latest" };
 
     // Si votre registre nécessite une authentification, fournissez les identifiants
     let credentials = Some(DockerCredentials {
         ..Default::default()
     });
 
-    let mut push_stream = docker.push_image(&*remote_image, Some(push_options), credentials);
+    let mut push_stream = docker.push_image(&remote_image, Some(push_options), credentials);
 
     while let Some(push_stream) = push_stream.next().await {
         match push_stream {
@@ -585,7 +580,6 @@ pub fn deploy_nephelios_stack() -> Result<(), String> {
 /// # Returns
 ///
 /// A `Result` indicating success or an error message in case of failure.
-
 pub async fn remove_service(app_name: &str) -> Result<(), String> {
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
@@ -733,8 +727,8 @@ pub async fn prune_images() -> Result<(), String> {
 
 /// Scales a Docker service.
 ///
-/// This function modifies the number of replicas for a given Docker service by executing  
-/// the `docker service scale` command. The service name is dynamically constructed using  
+/// This function modifies the number of replicas for a given Docker service by executing
+/// the `docker service scale` command. The service name is dynamically constructed using
 /// the provided application name and identifier.
 ///
 /// # Arguments
@@ -749,9 +743,8 @@ pub async fn prune_images() -> Result<(), String> {
 ///
 /// # Errors
 ///
-/// This function returns an error if the `docker` command fails to execute  
+/// This function returns an error if the `docker` command fails to execute
 /// or if the scaling operation does not complete successfully.
-
 pub async fn scale_app(app_name: &str, id: &str) -> Result<(), String> {
     let scale_arg = format!("nephelios_{}={}", app_name, id); // Concaténer le nom et "=0"
 
