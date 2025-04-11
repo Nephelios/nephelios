@@ -5,7 +5,7 @@ use futures_util::TryFutureExt;
 
 use crate::services::helpers::docker_helper::{
     build_image, deploy_nephelios_stack, generate_and_write_dockerfile, get_app_status,
-    list_deployed_apps, prune_images, push_image, remove_service, scale_app, AppMetadata,
+    list_deployed_apps, prune_images, push_image, remove_service, scale_app, update_metrics, AppMetadata,
 };
 
 use crate::services::helpers::traefik_helper::remove_app_compose;
@@ -15,6 +15,10 @@ use crate::services::websocket::{send_deployment_status, StatusSender};
 use serde_json::json;
 use serde_json::Value;
 use warp::{reject, Filter};
+use prometheus::{TextEncoder, Encoder};
+use crate::metrics::{REGISTRY};
+
+
 
 #[derive(Debug)]
 struct CustomError(String);
@@ -107,6 +111,30 @@ pub fn health_check_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
         .and(warp::path("health"))
         .map(|| warp::reply::json(&"OK"))
         .boxed()
+}
+
+
+
+pub fn create_metrics_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
+    warp::path("metrics")
+        .and(warp::get())
+        .and_then(handle_metrics)
+        .boxed()
+}
+
+
+async fn handle_metrics() -> Result<impl warp::Reply, warp::Rejection> {
+    if let Err(e) = update_metrics().await {
+        eprintln!("Failed to update metrics: {}", e);
+    }
+
+    let encoder = TextEncoder::new();
+    let metric_families = REGISTRY.gather();
+    let mut buffer = Vec::new();
+    encoder.encode(&metric_families, &mut buffer).unwrap();
+
+    let response = String::from_utf8(buffer.clone()).unwrap();
+    Ok(warp::reply::with_header(response, "Content-Type", encoder.format_type()))
 }
 
 /// Handles the app start logic.

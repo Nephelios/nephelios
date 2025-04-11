@@ -1,7 +1,7 @@
 mod routes;
 mod services;
 
-use crate::routes::{create_app_route, get_apps_route, health_check_route, remove_app_route, stop_app_route,start_app_route};
+use crate::routes::{create_app_route, get_apps_route, health_check_route, remove_app_route, stop_app_route,start_app_route, create_metrics_route};
 use crate::services::websocket::ws_route;
 
 use crate::services::helpers::docker_helper::{check_swarm, deploy_nephelios_stack, init_swarm, leave_swarm, prune_images, stop_nephelios_stack};
@@ -9,6 +9,8 @@ use std::env;
 use tokio::sync::broadcast;
 use warp::http::Method;
 use warp::Filter;
+mod metrics;
+use crate::metrics::{CONTAINER_CPU, CONTAINER_MEM, REGISTRY};
 
 /// Entry point for the application.
 ///
@@ -47,20 +49,22 @@ async fn main() {
         .allow_headers(vec!["Content-Type"]);
 
     let (status_tx, status_rx) = broadcast::channel(32);
-
     let api_routes = create_app_route(status_tx.clone())
-        .or(health_check_route())
-        .or(get_apps_route())
-        .or(ws_route(status_rx))
-        .or(remove_app_route())
-        .or(stop_app_route())
-        .or(start_app_route())
-        .with(cors);
+    .or(health_check_route())
+    .or(get_apps_route())
+    .or(ws_route(status_rx))
+    .or(remove_app_route())
+    .or(stop_app_route())
+    .or(start_app_route())
+    .or(create_metrics_route())
+    .with(cors);
 
+    REGISTRY.register(Box::new(CONTAINER_CPU.clone())).unwrap();
+    REGISTRY.register(Box::new(CONTAINER_MEM.clone())).unwrap();
 
     // Source : https://stackoverflow.com/a/71279547
     let (_addr, server) = warp::serve(api_routes)
-        .bind_with_graceful_shutdown(([127, 0, 0, 1], app_port), async {
+        .bind_with_graceful_shutdown(([0, 0, 0, 0], app_port), async {
             tokio::signal::ctrl_c().await.ok();
         });
 
