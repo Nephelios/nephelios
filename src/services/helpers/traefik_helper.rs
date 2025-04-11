@@ -44,8 +44,6 @@ pub fn add_to_deploy(app: &str, port: &str, metadata: &AppMetadata) -> io::Resul
     let service = app;
     let image = app;
     let replicas = 1;
-    let app = app;
-    let port = port;
     let resultat = format!(
         r#"  {}:
     image: registry:5000/{}:latest
@@ -97,7 +95,6 @@ pub fn add_to_deploy(app: &str, port: &str, metadata: &AppMetadata) -> io::Resul
 /// # Returns
 ///
 /// A `Result` indicating success or an I/O error.
-
 pub fn remove_app_compose(app_name: &str) -> io::Result<()> {
     let path = PathBuf::from("./nephelios.yml");
     let content = fs::read_to_string(&path)?;
@@ -114,7 +111,7 @@ pub fn remove_app_compose(app_name: &str) -> io::Result<()> {
             in_service = true;
             continue;
         }
-        if line.starts_with("  ") == false {
+        if !line.starts_with("  ") {
             in_service = false;
         }
         if !in_service {

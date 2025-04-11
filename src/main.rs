@@ -112,7 +112,7 @@ async fn main() {
         }
     }
 
-    println!("🚀 Server running on http://{}:{}", ip_addr.to_string(), app_port);
+    println!("🚀 Server running on http://{}:{}", ip_addr, app_port);
 
     match tokio::join!(tokio::task::spawn(server)).0 {
         Ok(()) => println!("serving"),
