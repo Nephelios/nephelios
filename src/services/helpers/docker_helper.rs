@@ -320,7 +320,7 @@ pub async fn build_image(
         .map_err(|e| format!("Failed to read tar file: {}", e))?;
 
     let options = BuildImageOptions {
-        t: format!("localhost:5000/{}:latest",app_name.to_lowercase()),
+        t: format!("{}:latest",app_name.to_lowercase()),
         rm: true,
         labels: metadata.to_labels(),
         ..Default::default()
@@ -367,10 +367,10 @@ pub async fn push_image(app_name: &str) -> Result<(), String> {
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
 
-    // Nom de l'image locale
-    let local_image = format!("localhost:5000/{}:latest", app_name.to_lowercase());
-    // Nom de l'image avec le registre
-    let remote_image = format!("localhost:5000/{}:latest", app_name.to_lowercase());
+    // Local image name (without registry)
+    let local_image = format!("{}:latest", app_name.to_lowercase());
+    // Remote image name (with registry)
+    let remote_image = format!("registry:5000/{}", app_name.to_lowercase());
 
     // Taguer l'image pour le registre
     let tag_options = TagImageOptions {
@@ -399,7 +399,16 @@ pub async fn push_image(app_name: &str) -> Result<(), String> {
         match push_stream {
             Ok(output) => {
                 if let Some(stream) = output.progress {
-                    println!("Push Image info: {}", stream);
+                    match serde_json::from_str::<serde_json::Value>(&stream) {
+                        Ok(value) => {
+                            if let Some(status) = value.get("status") {
+                                println!("Push Image info: {}", status);
+                            }
+                        }
+                        Err(_) => {
+                            println!("Push Image info: {}", stream);
+                        }
+                    }
                 }
                 if let Some(error) = output.error {
                     eprintln!("Error: {}", error);
@@ -429,13 +438,13 @@ pub fn deploy_nephelios_stack() -> Result<(), String> {
         .arg("stack")
         .arg("deploy")
         .arg("-c")
-        .arg("docker-compose.yml")
+        .arg("nephelios.yml")
         .arg("nephelios")
         .status()
-        .map_err(|e| format!("Failed to execute docker compose: {}", e))?;
+        .map_err(|e| format!("Failed to deploy Nephelios Stack : {}", e))?;
 
     if !status.success() {
-        return Err("Docker Compose command failed".to_string());
+        return Err("Deploy stack command failed".to_string());
     }
 
     Ok(())
