@@ -1,0 +1,94 @@
+version: '3.8'
+
+networks:
+  nephelios_overlay:
+    external: true
+
+volumes:
+  grafana_data:
+    name: grafana_data
+    external: true
+  prometheus_data:
+    name: prometheus_data
+    external: true
+  registry_data:
+    name: registry_data
+    external: true
+  nephelios_data:
+    name: nephelios_data
+    external: true
+  grafana_provisioning:
+    name: grafana_provisioning
+    external: true
+  grafana_dashboard:
+    name: grafana_dashboard
+    external: true
+
+services:
+  registry:
+    image: registry:2
+    ports:
+      - "5000:5000"
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+    volumes:
+      - registry_data:/var/lib/registry
+    networks:
+      - nephelios_overlay
+  traefik:
+    image: "traefik:v2.10"
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.swarmMode=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+    networks:
+      - nephelios_overlay
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - prometheus_data:/prometheus
+      - nephelios_data:/etc/prometheus
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "9090:9090"
+    networks:
+      - nephelios_overlay
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+
+  grafana:
+    image: grafana/grafana:8.4.3
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - grafana_provisioning:/etc/grafana
+      - grafana_dashboard:/var/lib/grafana/dashboards
+    ports:
+      - "3000:3000" 
+    networks:
+      - nephelios_overlay
+    deploy:
+      replicas: 1
+

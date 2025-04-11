@@ -16,7 +16,7 @@ use std::path::PathBuf;
 /// * `Ok(0)` if the application is not deployed.
 /// * `Err(String)` if there was an error during verification.
 pub fn verif_app(app: &str) -> io::Result<i32> {
-    let path = PathBuf::from("./docker-compose.yml");
+    let path = PathBuf::from("./nephelios.yml");
     let mut file = File::open(&path)?;
     let mut content = String::new();
     file.read_to_string(&mut content)?;
@@ -38,7 +38,7 @@ pub fn verif_app(app: &str) -> io::Result<i32> {
 /// * `Ok(())` if the application was successfully added.
 /// * `Err(String)` if there was an error during the addition.
 pub fn add_to_deploy(app: &str, port: &str, metadata: &AppMetadata) -> io::Result<()> {
-    let path = PathBuf::from("./docker-compose.yml");
+    let path = PathBuf::from("./nephelios.yml");
     let mut file = OpenOptions::new().append(true).create(true).open(path)?;
 
     let service = app;
@@ -48,7 +48,7 @@ pub fn add_to_deploy(app: &str, port: &str, metadata: &AppMetadata) -> io::Resul
     let port = port;
     let resultat = format!(
         r#"  {}:
-    image: localhost:5000/{}:latest
+    image: registry:5000/{}:latest
     deploy:
         mode: replicated
         replicas: {}
@@ -99,7 +99,7 @@ pub fn add_to_deploy(app: &str, port: &str, metadata: &AppMetadata) -> io::Resul
 /// A `Result` indicating success or an I/O error.
 
 pub fn remove_app_compose(app_name: &str) -> io::Result<()> {
-    let path = PathBuf::from("./docker-compose.yml");
+    let path = PathBuf::from("./nephelios.yml");
     let content = fs::read_to_string(&path)?;
 
 
