@@ -8,8 +8,8 @@ use crate::routes::{
 use crate::services::websocket::ws_route;
 
 use crate::services::helpers::docker_helper::{
-    check_swarm, connect_to_overlay_network, deploy_nephelios_stack, init_swarm, leave_swarm,
-    prune_images, stop_nephelios_stack,
+    check_swarm, connect_to_overlay_network, deploy_nephelios_stack,
+    disconnect_from_overlay_network, init_swarm, leave_swarm, prune_images, stop_nephelios_stack,
 };
 use std::env;
 use tokio::sync::broadcast;
@@ -116,9 +116,9 @@ async fn main() {
             println!("🔗 Connecting Nephelios to overlay network...");
             match connect_to_overlay_network().await {
                 Ok(_) => println!("✅ Connected to overlay network successfully"),
-                Err(e) => eprintln!("⚠️  Failed to connect to overlay network: {}", e)
+                Err(e) => eprintln!("❌ Failed to connect to overlay network: {}", e),
             }
-        },
+        }
         Err(e) => {
             eprintln!("❌ Failed to start Nephelios Stack: {}", e);
             return;
@@ -184,6 +184,13 @@ async fn main() {
     let cleanup_timeout = tokio::time::Duration::from_secs(10);
 
     match tokio::time::timeout(cleanup_timeout, async {
+        println!("🔗 Disconnecting from overlay network...");
+        match disconnect_from_overlay_network().await {
+            Ok(_) => println!("✅ Disconnected from overlay network"),
+            Err(e) => eprintln!("❌ Failed to disconnect from overlay network: {}", e),
+        }
+
+        println!("💥 Stopping Nephelios Stack...");
         match stop_nephelios_stack() {
             Ok(_) => println!("✅ Nephelios Stack terminated successfully"),
             Err(e) => eprintln!("❌ Failed to terminate Nephelios Stack: {}", e),

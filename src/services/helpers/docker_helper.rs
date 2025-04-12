@@ -560,6 +560,57 @@ pub async fn push_image(app_name: &str) -> Result<(), String> {
 /// # Returns
 /// * `Ok(())` if the connection was successful
 /// * `Err(String)` if there was an error during the process
+/// Disconnects the Nephelios container from the overlay network during cleanup
+///
+/// This function uses the Docker API to:
+/// 1. Find the Nephelios container
+/// 2. Disconnect it from the nephelios_overlay network
+///
+/// # Returns
+/// * `Ok(())` if the disconnection was successful
+/// * `Err(String)` if there was an error during the process
+pub async fn disconnect_from_overlay_network() -> Result<(), String> {
+    let docker = Docker::connect_with_local_defaults()
+        .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
+
+    // Find the Nephelios container using its unique label
+    let mut filters = HashMap::new();
+    filters.insert("label", vec!["com.nephelios.name=nephelios"]);
+    
+    let options = Some(ListContainersOptions {
+        filters,
+        ..Default::default()
+    });
+
+    let containers = docker
+        .list_containers(options)
+        .await
+        .map_err(|e| format!("Failed to list containers: {}", e))?;
+
+    let container = containers
+        .first()
+        .ok_or("Nephelios container not found".to_string())?;
+
+    let container_id = container
+        .id
+        .as_ref()
+        .ok_or("Container ID not found".to_string())?;
+
+    // Disconnect from the overlay network
+    docker
+        .disconnect_network(
+            "nephelios_overlay",
+            bollard::network::DisconnectNetworkOptions {
+                container: container_id.to_string(),
+                force: true,
+            },
+        )
+        .await
+        .map_err(|e| format!("Failed to disconnect from overlay network: {}", e))?;
+
+    Ok(())
+}
+
 pub async fn connect_to_overlay_network() -> Result<(), String> {
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
