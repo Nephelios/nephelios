@@ -1,4 +1,4 @@
-use crate::metrics::{CONTAINER_CPU, CONTAINER_MEM};
+use crate::metrics::{CONTAINER_CPU, CONTAINER_MEM, CONTAINER_NET_IN, CONTAINER_NET_OUT};
 use bollard::auth::DockerCredentials;
 use bollard::container::ListContainersOptions;
 use bollard::image::{BuildImageOptions, PruneImagesOptions, PushImageOptions, TagImageOptions};
@@ -151,6 +151,51 @@ pub async fn get_app_status(name: String) -> String {
         }
     }
     app_status.to_string()
+}
+
+pub async fn get_app_details(name: String) -> (String, Option<String>) {
+    let status = get_app_status(name.clone()).await;
+    let mut swarm_name = None;
+    
+    // Get container details to extract swarm task name
+    let docker = match Docker::connect_with_local_defaults() {
+        Ok(docker) => docker,
+        Err(_) => return (status, None),
+    };
+
+    // Create filters to find the specific container by app name
+    let mut filters = HashMap::new();
+    filters.insert(
+        "label".to_string(),
+        vec![format!("com.myapp.name={}", name)],
+    );
+
+    let options = Some(ListContainersOptions {
+        filters,
+        ..Default::default()
+    });
+
+    let containers = match docker.list_containers(options).await {
+        Ok(containers) => containers,
+        Err(_) => return (status, None),
+    };
+
+    // Extract swarm task name from labels if available
+    for container in containers {
+        if let Some(labels) = container.labels {
+            if let Some(task_name) = labels.get("com.docker.swarm.task.name") {
+                swarm_name = Some(task_name.clone());
+                break;
+            }
+            // Also check for service name which might be more useful
+            if let Some(service_name) = labels.get("com.docker.swarm.service.name") {
+                swarm_name = Some(service_name.clone());
+                break;
+            }
+        }
+    }
+
+    (status, swarm_name)
 }
 
 async fn is_app_running(name: String) -> Result<bool, String> {
@@ -878,6 +923,43 @@ pub async fn scale_app(app_name: &str, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn parse_network_io(net_io: &str) -> (f64, f64) {
+    // Format is typically like "42kB / 252B"
+    let parts: Vec<&str> = net_io.split('/').collect();
+    if parts.len() != 2 {
+        return (0.0, 0.0);
+    }
+
+    let in_str = parts[0].trim();
+    let out_str = parts[1].trim();
+
+    let net_in = parse_data_size(in_str);
+    let net_out = parse_data_size(out_str);
+
+    // Convert to KB for consistent metrics
+    (net_in, net_out)
+}
+
+fn parse_data_size(size_str: &str) -> f64 {
+    let re = regex::Regex::new(r"([0-9.]+)\s*([a-zA-Z]+)").unwrap();
+    if let Some(caps) = re.captures(size_str) {
+        let value: f64 = caps.get(1).unwrap().as_str().parse().unwrap_or(0.0);
+        let unit = caps.get(2).unwrap().as_str().to_lowercase();
+
+        // Convert to KB
+        match unit.as_str() {
+            "b" => value / 1024.0,
+            "kb" => value,
+            "mb" => value * 1024.0,
+            "gb" => value * 1024.0 * 1024.0,
+            "tb" => value * 1024.0 * 1024.0 * 1024.0,
+            _ => value,
+        }
+    } else {
+        0.0
+    }
+}
+
 pub async fn update_metrics() -> Result<(), Box<dyn std::error::Error>> {
     let output = std::process::Command::new("docker")
         .arg("stats")
@@ -891,15 +973,20 @@ pub async fn update_metrics() -> Result<(), Box<dyn std::error::Error>> {
 
     CONTAINER_CPU.reset();
     CONTAINER_MEM.reset();
+    CONTAINER_NET_IN.reset();
+    CONTAINER_NET_OUT.reset();
 
     for line in lines {
         let data: serde_json::Value = serde_json::from_str(line)?;
         let name = data["Name"].as_str().unwrap_or("unknown");
         let cpu = parse_percentage(data["CPUPerc"].as_str().unwrap_or("0%"));
         let mem = parse_memory(data["MemUsage"].as_str().unwrap_or("0MiB / 0MiB"));
+        let (net_in, net_out) = parse_network_io(data["NetIO"].as_str().unwrap_or("0kB / 0B"));
 
         CONTAINER_CPU.with_label_values(&[name]).set(cpu);
         CONTAINER_MEM.with_label_values(&[name]).set(mem);
+        CONTAINER_NET_IN.with_label_values(&[name]).set(net_in);
+        CONTAINER_NET_OUT.with_label_values(&[name]).set(net_out);
     }
 
     Ok(())

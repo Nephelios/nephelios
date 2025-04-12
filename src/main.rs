@@ -16,7 +16,7 @@ use tokio::sync::broadcast;
 use warp::http::Method;
 use warp::Filter;
 mod metrics;
-use crate::metrics::{CONTAINER_CPU, CONTAINER_MEM, REGISTRY};
+use crate::metrics::{CONTAINER_CPU, CONTAINER_MEM, CONTAINER_NET_IN, CONTAINER_NET_OUT, REGISTRY};
 
 /// Entry point for the application.
 ///
@@ -67,6 +67,12 @@ async fn main() {
 
     REGISTRY.register(Box::new(CONTAINER_CPU.clone())).unwrap();
     REGISTRY.register(Box::new(CONTAINER_MEM.clone())).unwrap();
+    REGISTRY
+        .register(Box::new(CONTAINER_NET_IN.clone()))
+        .unwrap();
+    REGISTRY
+        .register(Box::new(CONTAINER_NET_OUT.clone()))
+        .unwrap();
 
     // Source : https://stackoverflow.com/a/71279547
     let (_addr, server) =
