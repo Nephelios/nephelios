@@ -26,6 +26,7 @@ volumes:
 
 services:
   registry:
+    restart: always
     image: registry:2
     ports:
       - "5000:5000"
@@ -39,6 +40,7 @@ services:
     networks:
       - nephelios_overlay
   traefik:
+    restart: always
     image: "traefik:v2.10"
     command:
       - "--api.insecure=true"
@@ -64,6 +66,7 @@ services:
       - nephelios_overlay
 
   prometheus:
+    restart: always
     image: prom/prometheus:latest
     volumes:
       - prometheus_data:/prometheus
@@ -80,6 +83,7 @@ services:
           - node.role == manager
 
   grafana:
+    restart: always
     image: grafana/grafana:8.4.3
     volumes:
       - grafana_data:/var/lib/grafana

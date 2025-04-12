@@ -1,6 +1,7 @@
 services:
   nephelios:
     build: .
+    restart: always
     container_name: nephelios
     env_file:
       - .env
