@@ -576,7 +576,7 @@ pub async fn disconnect_from_overlay_network() -> Result<(), String> {
     // Find the Nephelios container using its unique label
     let mut filters = HashMap::new();
     filters.insert("label", vec!["com.nephelios.name=nephelios"]);
-    
+
     let options = Some(ListContainersOptions {
         filters,
         ..Default::default()
@@ -618,7 +618,7 @@ pub async fn connect_to_overlay_network() -> Result<(), String> {
     // Find the Nephelios container using its unique label
     let mut filters = HashMap::new();
     filters.insert("label", vec!["com.nephelios.name=nephelios"]);
-    
+
     let options = Some(ListContainersOptions {
         filters,
         ..Default::default()
