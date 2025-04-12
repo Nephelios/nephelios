@@ -2,7 +2,7 @@ use crate::metrics::{CONTAINER_CPU, CONTAINER_MEM};
 use bollard::auth::DockerCredentials;
 use bollard::container::ListContainersOptions;
 use bollard::image::{BuildImageOptions, PruneImagesOptions, PushImageOptions, TagImageOptions};
-use bollard::service::{InspectServiceOptions, ListServicesOptions};
+// Removed unused service imports
 use bollard::Docker;
 use chrono::Utc;
 use dirs::home_dir;
@@ -63,61 +63,74 @@ pub struct AppInfo {
     pub created_at: String,
     pub status: String,
     #[serde(default)]
-    pub container_id: Option<String>,
+    pub swarm_task_name: Option<String>,
 }
 
 pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
 
-    let filters: HashMap<String, Vec<String>> = HashMap::new();
-
-    let options = Some(ListServicesOptions {
-        filters,
-        ..Default::default()
-    });
-
-    let services = docker
-        .list_services(options)
+    // Create filters to get all containers
+    let containers = docker
+        .list_containers(Some(ListContainersOptions::<String> {
+            all: true,
+            ..Default::default()
+        }))
         .await
-        .map_err(|e| format!("Failed to list services: {}", e))?;
+        .map_err(|e| format!("Failed to list containers: {}", e))?;
 
     let mut apps = Vec::new();
 
-    let inspect_options = Some(InspectServiceOptions {
-        insert_defaults: true,
-    });
+    // Iterate over containers and check for nephelios namespace
+    for container in containers {
+        // Get detailed container information
+        if let Some(container_id) = &container.id {
+            let inspect_result = docker
+                .inspect_container(container_id, None)
+                .await
+                .map_err(|e| format!("Failed to inspect container: {}", e));
 
-    // Iterate over containers and check for custom labels
-    for service in services {
-        if let Some(spec) = docker
-            .inspect_service(service.id.as_ref().unwrap(), inspect_options)
-            .await
-            .unwrap()
-            .spec
-        {
-            if let Some(labels) = spec.labels {
-                if let (Some(name), Some(app_type), Some(url), Some(domain), Some(created)) = (
-                    labels.get("com.myapp.name"),
-                    labels.get("com.myapp.type"),
-                    labels.get("com.myapp.github_url"),
-                    labels.get("com.myapp.domain"),
-                    labels.get("com.myapp.created_at"),
-                ) {
-                    let app_status = get_app_status(name.to_string()).await;
+            if let Ok(inspect_data) = inspect_result {
+                // Check if the container has the required labels
+                if let Some(labels) = inspect_data.config.and_then(|c| c.labels) {
+                    // First check if this container belongs to the nephelios stack
+                    if let Some(namespace) = labels.get("com.docker.stack.namespace") {
+                        if namespace == "nephelios" {
+                            // Then check for our app labels
+                            if let (
+                                Some(name),
+                                Some(app_type),
+                                Some(url),
+                                Some(domain),
+                                Some(created),
+                            ) = (
+                                labels.get("com.myapp.name"),
+                                labels.get("com.myapp.type"),
+                                labels.get("com.myapp.github_url"),
+                                labels.get("com.myapp.domain"),
+                                labels.get("com.myapp.created_at"),
+                            ) {
+                                let app_status = get_app_status(name.to_string()).await;
 
-                    // Collect app info, handle Option<String> for container.id
-                    apps.push(AppInfo {
-                        app_name: name.clone(),
-                        app_type: app_type.clone(),
-                        github_url: url.clone(),
-                        domain: domain.clone(),
-                        created_at: created.clone(),
-                        status: app_status,
-                        container_id: Some(
-                            service.id.clone().unwrap_or_else(|| "unknown".to_string()),
-                        ),
-                    });
+                                // Use the task ID as container_id if available
+                                let task_name = labels
+                                    .get("com.docker.swarm.task.name")
+                                    .map(|id| id.clone())
+                                    .unwrap_or_else(|| container_id.clone());
+
+                                // Collect app info
+                                apps.push(AppInfo {
+                                    app_name: name.clone(),
+                                    app_type: app_type.clone(),
+                                    github_url: url.clone(),
+                                    domain: domain.clone(),
+                                    created_at: created.clone(),
+                                    status: app_status,
+                                    swarm_task_name: Some(task_name),
+                                });
+                            }
+                        }
+                    }
                 }
             }
         }
