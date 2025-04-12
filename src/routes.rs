@@ -1,7 +1,12 @@
+use std::collections::HashMap;
+
 use crate::services::helpers::traefik_helper::{add_to_deploy, verif_app};
 use futures_util::TryFutureExt;
 
-use crate::services::helpers::docker_helper::{build_image, deploy_nephelios_stack, generate_and_write_dockerfile, get_app_status, list_deployed_apps, prune_images, push_image, remove_service, scale_app, update_metrics, AppMetadata};
+use crate::services::helpers::docker_helper::{
+    build_image, deploy_nephelios_stack, generate_and_write_dockerfile, get_app_status,
+    list_deployed_apps, prune_images, push_image, remove_service, scale_app, update_metrics, AppMetadata,
+};
 
 use crate::services::helpers::traefik_helper::remove_app_compose;
 
@@ -62,7 +67,6 @@ pub fn remove_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
         .boxed()
 }
 
-
 /// Creates the route for stopping an app.
 ///
 /// This route listens for POST requests at the `/stop` path and expects a JSON body.
@@ -73,10 +77,10 @@ pub fn remove_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
 
 pub fn stop_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     warp::post()
-    .and(warp::path("stop"))
-    .and(warp::body::json()) // Expect a JSON body
-    .and_then(handle_stop_app)
-    .boxed()
+        .and(warp::path("stop"))
+        .and(warp::body::json()) // Expect a JSON body
+        .and_then(handle_stop_app)
+        .boxed()
 }
 
 /// Creates the route for starting an app.
@@ -89,10 +93,10 @@ pub fn stop_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
 
 pub fn start_app_route() -> warp::filters::BoxedFilter<(impl warp::Reply,)> {
     warp::post()
-    .and(warp::path("start"))
-    .and(warp::body::json()) // Expect a JSON body
-    .and_then(handle_start_app)
-    .boxed()
+        .and(warp::path("start"))
+        .and(warp::body::json()) // Expect a JSON body
+        .and_then(handle_start_app)
+        .boxed()
 }
 
 /// Creates the route for health checks.
@@ -146,16 +150,15 @@ async fn handle_metrics() -> Result<impl warp::Reply, warp::Rejection> {
 ///
 /// A result containing a Warp reply or a Warp rejection.
 
-async fn handle_start_app(body: Value) -> Result<impl warp::Reply, warp::Rejection>{
-
+async fn handle_start_app(body: Value) -> Result<impl warp::Reply, warp::Rejection> {
     let app_name = body
         .get("app_name")
         .and_then(Value::as_str)
         .unwrap_or("default-app");
 
-    let scale: &str = "1";  
+    let scale: &str = "1";
 
-    let _ = scale_app(app_name,scale).await.map_err(|e|{
+    let _ = scale_app(app_name, scale).await.map_err(|e| {
         warp::reject::custom(CustomError(format!(
             "Failed to scale service for app {}: {}",
             app_name, e
@@ -165,8 +168,7 @@ async fn handle_start_app(body: Value) -> Result<impl warp::Reply, warp::Rejecti
     Ok(warp::reply::with_status(
         format!("start app: {}.", app_name),
         warp::http::StatusCode::CREATED,
-        ))
-
+    ))
 }
 
 /// Handles the app stop logic.
@@ -183,15 +185,14 @@ async fn handle_start_app(body: Value) -> Result<impl warp::Reply, warp::Rejecti
 /// A result containing a Warp reply or a Warp rejection.
 
 async fn handle_stop_app(body: Value) -> Result<impl warp::Reply, warp::Rejection> {
-
     let app_name = body
         .get("app_name")
         .and_then(Value::as_str)
         .unwrap_or("default-app");
 
-    let scale: &str = "0"; 
+    let scale: &str = "0";
 
-    let _ = scale_app(app_name, scale).await.map_err(|e|{
+    let _ = scale_app(app_name, scale).await.map_err(|e| {
         warp::reject::custom(CustomError(format!(
             "Failed to scale service for app {}: {}",
             app_name, e
@@ -201,8 +202,7 @@ async fn handle_stop_app(body: Value) -> Result<impl warp::Reply, warp::Rejectio
     Ok(warp::reply::with_status(
         format!("stop app: {}.", app_name),
         warp::http::StatusCode::CREATED,
-        ))
-
+    ))
 }
 
 /// Handles the app removal logic.
@@ -293,9 +293,7 @@ async fn handle_create_app(
     body: Value,
     status_tx: StatusSender,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-
     let _ = tokio::spawn(async move {
-
         let app_name = body
             .get("app_name")
             .and_then(Value::as_str)
@@ -306,16 +304,52 @@ async fn handle_create_app(
             .unwrap_or("nodejs");
         let github_url = body.get("github_url").and_then(Value::as_str);
 
+        let install_command = body
+            .get("install_command")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let run_command = body
+            .get("run_command")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let build_command = body
+            .get("build_command")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let app_workdir = body
+            .get("app_workdir")
+            .and_then(Value::as_str)
+            .unwrap_or("/app");
+        let additional_inputs = body
+            .get("additionalInputs")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| {
+                        let key = item.get("key").and_then(Value::as_str)?;
+                        let value = item.get("value").and_then(Value::as_str)?;
+                        Some((key.to_string(), value.to_string()))
+                    })
+                    .collect::<HashMap<String, String>>()
+            })
+            .unwrap_or_else(HashMap::new);
+
         if github_url.is_none() || github_url.unwrap().is_empty() {
-            send_deployment_status(&status_tx, app_name, "error", "GitHub URL is required", None).await;
+            send_deployment_status(
+                &status_tx,
+                app_name,
+                "error",
+                "GitHub URL is required",
+                None,
+            )
+            .await;
             return Ok(warp::reply::with_status(
                 warp::reply::json(&json!({
-                "error": "GitHub URL is required"
-            })),
+                    "error": "GitHub URL is required"
+                })),
                 warp::http::StatusCode::BAD_REQUEST,
             ));
         }
-
 
         let github_url = github_url.unwrap();
 
@@ -325,9 +359,15 @@ async fn handle_create_app(
             github_url.to_string(),
         );
 
-
         // Clone repository
-        send_deployment_status(&status_tx, app_name, "in_progress", "Cloning repository", None).await;
+        send_deployment_status(
+            &status_tx,
+            app_name,
+            "in_progress",
+            "Cloning repository",
+            None,
+        )
+        .await;
         let temp_dir = match create_temp_dir(app_name) {
             Ok(dir) => dir,
             Err(e) => {
@@ -335,9 +375,10 @@ async fn handle_create_app(
                     &status_tx,
                     app_name,
                     "error",
-                    &format!("Failed to create temp directory: {}", e), None
+                    &format!("Failed to create temp directory: {}", e),
+                    None,
                 )
-                    .await;
+                .await;
                 return Err(reject::custom(CustomError(format!(
                     "Failed to create temp directory: {}",
                     e
@@ -348,8 +389,14 @@ async fn handle_create_app(
         let temp_dir_path = match temp_dir.to_str() {
             Some(path) => path,
             None => {
-                send_deployment_status(&status_tx, app_name, "error", "Invalid temp directory path", None)
-                    .await;
+                send_deployment_status(
+                    &status_tx,
+                    app_name,
+                    "error",
+                    "Invalid temp directory path",
+                    None,
+                )
+                .await;
                 return Err(reject::custom(CustomError(
                     "Temp directory path is invalid".to_string(),
                 )));
@@ -362,9 +409,10 @@ async fn handle_create_app(
                 &status_tx,
                 app_name,
                 "error",
-                &format!("Failed to clone repository: {}", e), None
+                &format!("Failed to clone repository: {}", e),
+                None,
             )
-                .await;
+            .await;
             return Err(reject::custom(CustomError(format!(
                 "Failed to clone repository: {}",
                 e
@@ -372,15 +420,25 @@ async fn handle_create_app(
         }
 
         // Generate Dockerfile
-        if let Err(e) = generate_and_write_dockerfile(app_type, temp_dir_path, &metadata) {
+        if let Err(e) = generate_and_write_dockerfile(
+            app_type,
+            temp_dir_path,
+            &metadata,
+            install_command,
+            run_command,
+            build_command,
+            app_workdir,
+            Some(&additional_inputs),
+        ) {
             let _ = remove_temp_dir(&temp_dir);
             send_deployment_status(
                 &status_tx,
                 app_name,
                 "error",
-                &format!("Failed to generate Dockerfile: {}", e), None
+                &format!("Failed to generate Dockerfile: {}", e),
+                None,
             )
-                .await;
+            .await;
             return Err(reject::custom(CustomError(format!(
                 "Failed to generate Dockerfile: {}",
                 e
@@ -390,23 +448,38 @@ async fn handle_create_app(
         send_deployment_status(&status_tx, app_name, "success", "Cloning repository", None).await;
 
         // Build Docker image
-        send_deployment_status(&status_tx, app_name, "in_progress", "Building Docker image", None).await;
+        send_deployment_status(
+            &status_tx,
+            app_name,
+            "in_progress",
+            "Building Docker image",
+            None,
+        )
+        .await;
         if let Err(e) = build_image(app_name, temp_dir_path, &metadata).await {
             let _ = remove_temp_dir(&temp_dir);
             send_deployment_status(
                 &status_tx,
                 app_name,
                 "error",
-                &format!("Failed to build Docker image: {}", e), None
+                &format!("Failed to build Docker image: {}", e),
+                None,
             )
-                .await;
+            .await;
             return Err(reject::custom(CustomError(format!(
                 "Failed to build Docker image: {}",
                 e
             ))));
         }
 
-        send_deployment_status(&status_tx, app_name, "success", "Building Docker image", None).await;
+        send_deployment_status(
+            &status_tx,
+            app_name,
+            "success",
+            "Building Docker image",
+            None,
+        )
+        .await;
 
         if let Err(e) = push_image(app_name).await {
             return Err(reject::custom(CustomError(format!(
@@ -415,7 +488,14 @@ async fn handle_create_app(
             ))));
         }
 
-        send_deployment_status(&status_tx, app_name, "in_progress", "Starting deployment", None).await;
+        send_deployment_status(
+            &status_tx,
+            app_name,
+            "in_progress",
+            "Starting deployment",
+            None,
+        )
+        .await;
         if let Ok(1) = verif_app(app_name) {
             if let Err(e) = deploy_nephelios_stack() {
                 let _ = remove_temp_dir(&temp_dir);
@@ -423,9 +503,10 @@ async fn handle_create_app(
                     &status_tx,
                     app_name,
                     "error",
-                    &format!("Failed to update deployment: {}", e), None
+                    &format!("Failed to update deployment: {}", e),
+                    None,
                 )
-                    .await;
+                .await;
                 return Err(reject::custom(CustomError(format!(
                     "Failed to execute docker compose: {}",
                     e
@@ -438,9 +519,10 @@ async fn handle_create_app(
                     &status_tx,
                     app_name,
                     "error",
-                    &format!("Failed to add app to deploy file: {}", e),None
+                    &format!("Failed to add app to deploy file: {}", e),
+                    None,
                 )
-                    .await;
+                .await;
                 return Err(reject::custom(CustomError(format!(
                     "Failed to add app to deploy file: {}",
                     e
@@ -453,9 +535,10 @@ async fn handle_create_app(
                     &status_tx,
                     app_name,
                     "error",
-                    &format!("Failed to start deployment: {}", e), None
+                    &format!("Failed to start deployment: {}", e),
+                    None,
                 )
-                    .await;
+                .await;
                 return Err(reject::custom(CustomError(format!(
                     "Failed to execute docker compose: {}",
                     e
@@ -473,7 +556,7 @@ async fn handle_create_app(
             let res_prune_images = prune_images().await;
             match res_prune_images {
                 Ok(_) => println!("✅ Docker images pruned successfully"),
-                Err(e) => eprintln!("❌ Failed to prune Docker images: {}", e)
+                Err(e) => eprintln!("❌ Failed to prune Docker images: {}", e),
             }
         });
 
@@ -482,15 +565,19 @@ async fn handle_create_app(
         "app_name": app_name,
         "app_type": app_type,
         "github_url": github_url,
-        "url": format!("http://{}.localhost", app_name),
         "status": get_app_status(app_name.to_string()).await,
-        "metadata": {
-            "created_at": metadata.created_at,
-            "domain": metadata.domain,
-            }
+        "domain": metadata.domain,
+        "created_at": metadata.created_at,
         });
 
-        send_deployment_status(&status_tx, app_name, "deployed", "deployed_info", Some(response.clone())).await;
+        send_deployment_status(
+            &status_tx,
+            app_name,
+            "deployed",
+            "deployed_info",
+            Some(response.clone()),
+        )
+        .await;
 
         Ok(warp::reply::with_status(
             warp::reply::json(&response),
@@ -498,5 +585,8 @@ async fn handle_create_app(
         ))
     });
 
-    Ok(warp::reply::with_status("Deployment Job has been created !", warp::http::StatusCode::CREATED))
+    Ok(warp::reply::with_status(
+        "Deployment Job has been created !",
+        warp::http::StatusCode::CREATED,
+    ))
 }

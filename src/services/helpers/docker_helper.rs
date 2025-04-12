@@ -1,3 +1,4 @@
+use crate::metrics::{CONTAINER_CPU, CONTAINER_MEM, REGISTRY};
 use bollard::auth::DockerCredentials;
 use bollard::container::{ListContainersOptions, StopContainerOptions};
 use bollard::image::{BuildImageOptions, PruneImagesOptions, PushImageOptions, TagImageOptions};
@@ -7,6 +8,7 @@ use chrono::Utc;
 use dirs::home_dir;
 use futures_util::stream::StreamExt;
 use futures_util::TryStreamExt;
+use prometheus::{Encoder, GaugeVec, Registry, TextEncoder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -18,8 +20,6 @@ use std::path::Path;
 use std::process::Command;
 use tar::Builder;
 use walkdir::WalkDir;
-use prometheus::{Encoder, TextEncoder, GaugeVec, Registry};
-use crate::metrics::{REGISTRY, CONTAINER_CPU, CONTAINER_MEM};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AppMetadata {
@@ -74,7 +74,7 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
 
     let filters: HashMap<String, Vec<String>> = HashMap::new();
 
-    let options = Some(ListServicesOptions{
+    let options = Some(ListServicesOptions {
         filters,
         ..Default::default()
     });
@@ -86,18 +86,19 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
 
     let mut apps = Vec::new();
 
-
-
-    let inspect_options = Some(InspectServiceOptions{
+    let inspect_options = Some(InspectServiceOptions {
         insert_defaults: true,
     });
 
-
     // Iterate over containers and check for custom labels
     for service in services {
-        if let Some(spec) = docker.inspect_service(service.id.as_ref().unwrap(), inspect_options).await.unwrap().spec {
+        if let Some(spec) = docker
+            .inspect_service(service.id.as_ref().unwrap(), inspect_options)
+            .await
+            .unwrap()
+            .spec
+        {
             if let Some(labels) = spec.labels {
-
                 if let (Some(name), Some(app_type), Some(url), Some(domain), Some(created)) = (
                     labels.get("com.myapp.name"),
                     labels.get("com.myapp.type"),
@@ -116,10 +117,7 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
                         created_at: created.clone(),
                         status: app_status,
                         container_id: Some(
-                            service
-                                .id
-                                .clone()
-                                .unwrap_or_else(|| "unknown".to_string()),
+                            service.id.clone().unwrap_or_else(|| "unknown".to_string()),
                         ),
                     });
                 }
@@ -152,7 +150,10 @@ async fn is_app_running(name: String) -> Result<bool, String> {
         .list_containers(Some(ListContainersOptions {
             filters: {
                 let mut filters = HashMap::new();
-                filters.insert("label".to_string(), vec![format!("com.myapp.name={}", name.clone())]);
+                filters.insert(
+                    "label".to_string(),
+                    vec![format!("com.myapp.name={}", name.clone())],
+                );
                 filters
             },
             ..Default::default()
@@ -188,10 +189,7 @@ fn create_docker_context(app_name: &str, app_path: &str) -> Result<String, Strin
     }
 
     let home = home_dir().ok_or("Failed to find home directory")?;
-    let tar_path = home.join(format!(
-        ".cache/nephelios/{}.tar",
-        app_name
-    ));
+    let tar_path = home.join(format!(".cache/nephelios/{}.tar", app_name));
 
     let tar_file =
         fs::File::create(&tar_path).map_err(|e| format!("Failed to create tar file: {}", e))?;
@@ -230,6 +228,12 @@ fn create_docker_context(app_name: &str, app_path: &str) -> Result<String, Strin
 /// # Arguments
 /// * `app_type` - The type of the application ("nodejs", "python", etc.).
 /// * `app_path` - The path to the application directory.
+/// * `metadata` - The application metadata.
+/// * `install_command` - Custom install command from the frontend.
+/// * `run_command` - Custom run command from the frontend.
+/// * `build_command` - Custom build command from the frontend.
+/// * `app_workdir` - Working directory for the application in the container.
+/// * `additional_inputs` - Optional additional environment variables and settings.
 ///
 /// # Returns
 /// * `Ok(())` if successful.
@@ -238,6 +242,11 @@ pub fn generate_and_write_dockerfile(
     app_type: &str,
     app_path: &str,
     metadata: &AppMetadata,
+    install_command: &str,
+    run_command: &str,
+    build_command: &str,
+    app_workdir: &str,
+    additional_inputs: Option<&HashMap<String, String>>,
 ) -> Result<(), String> {
     let dockerfile_path = Path::new(app_path).join("Dockerfile");
 
@@ -256,31 +265,145 @@ pub fn generate_and_write_dockerfile(
         .collect::<Vec<_>>()
         .join("\n");
 
+    // Generate environment variables from additional_inputs
+    let env_vars = additional_inputs
+        .map(|inputs| {
+            inputs
+                .iter()
+                .map(|(k, v)| format!("ENV {}=\"{}\"", k, v))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_else(|| "".to_string());
+
     let dockerfile_content = match app_type {
         "nodejs" => {
+            // Detect which package manager is being used
+            let uses_npm = install_command.contains("npm")
+                || build_command.contains("npm")
+                || run_command.contains("npm");
+
+            let uses_yarn = install_command.contains("yarn")
+                || build_command.contains("yarn")
+                || run_command.contains("yarn");
+
+            let uses_pnpm = install_command.contains("pnpm")
+                || build_command.contains("pnpm")
+                || run_command.contains("pnpm");
+
+            // Determine which package manager to use
+            let package_manager = if uses_yarn {
+                "yarn"
+            } else if uses_pnpm {
+                "pnpm"
+            } else if uses_npm {
+                "npm"
+            } else {
+                "bun"
+            };
+
+            // Choose the base image based on the package manager
+            let base_image = match package_manager {
+                "yarn" => "node:18-alpine".to_string(),
+                "pnpm" => "node:18-alpine".to_string(),
+                "npm" => "node:18-alpine".to_string(),
+                _ => "oven/bun:latest".to_string(),
+            };
+
+            // Additional setup commands for package managers
+            let setup_cmd = match package_manager {
+                "yarn" => {
+                    "RUN apk add --no-cache curl && curl -o- -L https://yarnpkg.com/install.sh | sh"
+                        .to_string()
+                }
+                "pnpm" => "RUN npm install -g pnpm".to_string(),
+                _ => "".to_string(), // No additional setup for npm or bun
+            };
+
+            // Determine the appropriate install command based on the package manager
+            let install_cmd = if !install_command.is_empty() {
+                install_command.to_string()
+            } else {
+                match package_manager {
+                    "yarn" => "yarn install --production".to_string(),
+                    "pnpm" => "pnpm install --prod".to_string(),
+                    "npm" => "npm install --production".to_string(),
+                    _ => "bun install --production".to_string(),
+                }
+            };
+
+            let build_cmd = if !build_command.is_empty() {
+                format!("RUN {}", build_command)
+            } else {
+                "".to_string()
+            };
+
+            let run_cmd = if !run_command.is_empty() {
+                format!("CMD [\"sh\", \"-c\", \"{}\"]", run_command)
+            } else {
+                match package_manager {
+                    "yarn" => "CMD [\"sh\", \"-c\", \"if yarn dev 2>/dev/null; then yarn dev; else yarn start; fi\"]".to_string(),
+                    "pnpm" => "CMD [\"sh\", \"-c\", \"if pnpm dev 2>/dev/null; then pnpm dev; else pnpm start; fi\"]".to_string(),
+                    "npm" => "CMD [\"sh\", \"-c\", \"if npm run dev 2>/dev/null; then npm run dev; else npm start; fi\"]".to_string(),
+                    _ => "CMD [\"sh\", \"-c\", \"if bun dev 2>/dev/null; then bun dev; else bun start; fi\"]".to_string()
+                }
+            };
+
             format!(
-                r#"FROM oven/bun:latest
-WORKDIR /app
+                r#"FROM {}
+WORKDIR {}
+{}
+{}
 {}
 COPY package.json ./
-RUN bun install --production
+RUN {}
 COPY . .
+{}
 EXPOSE {}
-CMD ["sh", "-c", "if bun dev 2>/dev/null; then bun dev; else bun start; fi"]"#,
-                labels, deploy_port
+{}"#,
+                base_image,
+                app_workdir,
+                labels,
+                env_vars,
+                setup_cmd,
+                install_cmd,
+                build_cmd,
+                deploy_port,
+                run_cmd
             )
         }
         "python" => {
+            // Determine the appropriate commands based on provided values
+            let install_cmd = if !install_command.is_empty() {
+                install_command.to_string()
+            } else {
+                "pip install --no-cache-dir -r requirements.txt".to_string()
+            };
+
+            let build_cmd = if !build_command.is_empty() {
+                format!("RUN {}", build_command)
+            } else {
+                "".to_string()
+            };
+
+            let run_cmd = if !run_command.is_empty() {
+                format!("CMD [\"sh\", \"-c\", \"{}\"]", run_command)
+            } else {
+                "CMD [\"python\", \"app.py\"]".to_string()
+            };
+
             format!(
                 r#"FROM python:3.8-slim
-WORKDIR /app
+WORKDIR {}
+{}
 {}
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN {}
 COPY . .
+{}
 EXPOSE {}
-CMD ["python", "app.py"]"#,
-                labels, deploy_port
+{}"#,
+                app_workdir, labels, env_vars, install_cmd, build_cmd, deploy_port, run_cmd
             )
         }
         _ => return Err(format!("Unsupported app type: {}", app_type)),
@@ -311,16 +434,18 @@ pub async fn build_image(
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
 
-    let tar_path = create_docker_context(app_name, app_path).map_err(|e| format!("Error: {}", e))?;
-    let mut tar_file = File::open(&tar_path)
-        .map_err(|e| format!("Failed to open tar file: {}", e))?;
+    let tar_path =
+        create_docker_context(app_name, app_path).map_err(|e| format!("Error: {}", e))?;
+    let mut tar_file =
+        File::open(&tar_path).map_err(|e| format!("Failed to open tar file: {}", e))?;
 
     let mut contents = Vec::new();
-    tar_file.read_to_end(&mut contents)
+    tar_file
+        .read_to_end(&mut contents)
         .map_err(|e| format!("Failed to read tar file: {}", e))?;
 
     let options = BuildImageOptions {
-        t: format!("{}:latest",app_name.to_lowercase()),
+        t: format!("{}:latest", app_name.to_lowercase()),
         rm: true,
         labels: metadata.to_labels(),
         ..Default::default()
@@ -330,7 +455,6 @@ pub async fn build_image(
 
     while let Some(build_result) = build_stream.next().await {
         match build_result {
-
             Ok(output) => {
                 if let Some(stream) = output.stream {
                     println!("Build Info: {}", stream);
@@ -450,7 +574,6 @@ pub fn deploy_nephelios_stack() -> Result<(), String> {
     Ok(())
 }
 
-
 /// Removes the container for the given application.
 ///
 /// Executes the `docker rm` command to remove the container with the given name.
@@ -501,7 +624,6 @@ pub fn leave_swarm() -> Result<(), String> {
     Ok(())
 }
 
-
 /// Stops the Nephelios stack by removing the Docker stack.
 ///
 /// # Returns
@@ -509,7 +631,6 @@ pub fn leave_swarm() -> Result<(), String> {
 /// * `Ok(())` if the stack was successfully stopped.
 /// * `Err(String)` if there was an error during the process.
 pub fn stop_nephelios_stack() -> Result<(), String> {
-
     let status = Command::new("docker")
         .arg("stack")
         .arg("rm")
@@ -524,7 +645,6 @@ pub fn stop_nephelios_stack() -> Result<(), String> {
     Ok(())
 }
 
-
 /// Initializes Docker Swarm with the given IP address.
 ///
 /// # Arguments
@@ -536,10 +656,13 @@ pub fn stop_nephelios_stack() -> Result<(), String> {
 /// * `Ok(())` if the Docker Swarm was successfully initialized.
 /// * `Err(String)` if there was an error during initialization.
 pub fn init_swarm(ip_addr: IpAddr) -> Result<(), String> {
-    let addr_parameter = format!("--advertise-addr={}", env::var("ADVERTISE_ADDR").unwrap_or_else(|_| {
-        // Specify a default IP address if ADVERTISE_ADDR is not set
-        ip_addr.to_string()
-    }));
+    let addr_parameter = format!(
+        "--advertise-addr={}",
+        env::var("ADVERTISE_ADDR").unwrap_or_else(|_| {
+            // Specify a default IP address if ADVERTISE_ADDR is not set
+            ip_addr.to_string()
+        })
+    );
 
     println!("Init swarm with address: {}", addr_parameter);
     let status = Command::new("docker")
@@ -586,9 +709,7 @@ pub async fn prune_images() -> Result<(), String> {
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
 
     let filters: HashMap<String, Vec<String>> = HashMap::new();
-    let options = Some(PruneImagesOptions {
-        filters
-    });
+    let options = Some(PruneImagesOptions { filters });
 
     let result = docker
         .prune_images(options)
@@ -601,7 +722,7 @@ pub async fn prune_images() -> Result<(), String> {
             for image in images_deleted {
                 match &image.deleted {
                     None => {}
-                    Some(deleted) => println!("Deleted image: {}", deleted)
+                    Some(deleted) => println!("Deleted image: {}", deleted),
                 }
             }
         }
@@ -609,7 +730,6 @@ pub async fn prune_images() -> Result<(), String> {
 
     Ok(())
 }
-
 
 /// Scales a Docker service.
 ///
@@ -633,7 +753,7 @@ pub async fn prune_images() -> Result<(), String> {
 /// or if the scaling operation does not complete successfully.
 
 pub async fn scale_app(app_name: &str, id: &str) -> Result<(), String> {
-    let scale_arg = format!("nephelios_{}={}", app_name,id); // Concaténer le nom et "=0"
+    let scale_arg = format!("nephelios_{}={}", app_name, id); // Concaténer le nom et "=0"
 
     let status = Command::new("docker")
         .current_dir("./")
@@ -650,15 +770,13 @@ pub async fn scale_app(app_name: &str, id: &str) -> Result<(), String> {
     Ok(())
 }
 
-
-
 pub async fn update_metrics() -> Result<(), Box<dyn std::error::Error>> {
     let output = std::process::Command::new("docker")
         .arg("stats")
         .arg("--no-stream")
         .arg("--format")
         .arg("{{json .}}")
-        .output()?; 
+        .output()?;
 
     let stdout = String::from_utf8(output.stdout)?;
     let lines = stdout.lines();
@@ -679,11 +797,9 @@ pub async fn update_metrics() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-
 fn parse_percentage(val: &str) -> f64 {
     val.trim_end_matches('%').parse::<f64>().unwrap_or(0.0)
 }
-
 
 fn parse_memory(val: &str) -> f64 {
     val.split('/')
