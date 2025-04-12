@@ -1,6 +1,6 @@
 use crate::metrics::REGISTRY;
 use crate::services::helpers::docker_helper::{
-    build_image, deploy_nephelios_stack, generate_and_write_dockerfile, get_app_status,
+    build_image, deploy_nephelios_stack, generate_and_write_dockerfile, get_app_details,
     list_deployed_apps, prune_images, push_image, remove_service, scale_app, update_metrics,
     AppMetadata,
 };
@@ -581,12 +581,16 @@ async fn handle_create_app(
             }
         });
 
+        // Get both the app status and swarm service name
+        let (status, swarm_name) = get_app_details(app_name.to_string()).await;
+
         let response = json!({
         "message": "Application created successfully",
         "app_name": app_name,
         "app_type": app_type,
         "github_url": github_url,
-        "status": get_app_status(app_name.to_string()).await,
+        "status": status,
+        "swarm_task_name": swarm_name,
         "domain": metadata.domain,
         "created_at": metadata.created_at,
         });

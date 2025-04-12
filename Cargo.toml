@@ -23,6 +23,7 @@ bytes = "1.1"
 futures = "0.3"
 prometheus = "0.13"
 lazy_static = "1.4"
+regex = "1.10.2"
 
 [[bin]]
 name = "nephelios"
