@@ -22,7 +22,7 @@ jobs:
 
       - name: Validate Cargo.toml version
         run: |
-          FILE_VERSION=$(grep '^version = ' Cargo.toml | cut -d '"' -f2)
+          FILE_VERSION=$(grep -E '^\s*version = ' Cargo.toml | cut -d '"' -f2)
           if [ "$FILE_VERSION" != "$VERSION" ]; then
             echo "❌ Cargo.toml version ($FILE_VERSION) does not match tag version ($VERSION)"
             exit 1
