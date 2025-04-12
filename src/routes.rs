@@ -308,10 +308,18 @@ async fn handle_create_app(
             .get("install_command")
             .and_then(Value::as_str)
             .unwrap_or("");
-        let start_command = body
-            .get("start_command")
+        let run_command = body
+            .get("run_command")
             .and_then(Value::as_str)
             .unwrap_or("");
+        let build_command = body
+            .get("build_command")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let app_workdir = body
+            .get("app_workdir")
+            .and_then(Value::as_str)
+            .unwrap_or("/app");
         let additional_inputs = body
             .get("additionalInputs")
             .and_then(Value::as_array)
@@ -416,8 +424,10 @@ async fn handle_create_app(
             app_type,
             temp_dir_path,
             &metadata,
-            start_command,
             install_command,
+            run_command,
+            build_command,
+            app_workdir,
             Some(&additional_inputs),
         ) {
             let _ = remove_temp_dir(&temp_dir);
