@@ -1,10 +1,16 @@
 mod routes;
 mod services;
 
-use crate::routes::{create_app_route, get_apps_route, health_check_route, remove_app_route, stop_app_route,start_app_route, create_metrics_route};
+use crate::routes::{
+    create_app_route, create_metrics_route, get_apps_route, health_check_route, remove_app_route,
+    start_app_route, stop_app_route,
+};
 use crate::services::websocket::ws_route;
 
-use crate::services::helpers::docker_helper::{check_swarm, deploy_nephelios_stack, init_swarm, leave_swarm, prune_images, stop_nephelios_stack};
+use crate::services::helpers::docker_helper::{
+    check_swarm, deploy_nephelios_stack, init_swarm, leave_swarm, prune_images,
+    stop_nephelios_stack,
+};
 use std::env;
 use tokio::sync::broadcast;
 use warp::http::Method;
@@ -50,21 +56,21 @@ async fn main() {
 
     let (status_tx, status_rx) = broadcast::channel(32);
     let api_routes = create_app_route(status_tx.clone())
-    .or(health_check_route())
-    .or(get_apps_route())
-    .or(ws_route(status_rx))
-    .or(remove_app_route())
-    .or(stop_app_route())
-    .or(start_app_route())
-    .or(create_metrics_route())
-    .with(cors);
+        .or(health_check_route())
+        .or(get_apps_route())
+        .or(ws_route(status_rx))
+        .or(remove_app_route())
+        .or(stop_app_route())
+        .or(start_app_route())
+        .or(create_metrics_route())
+        .with(cors);
 
     REGISTRY.register(Box::new(CONTAINER_CPU.clone())).unwrap();
     REGISTRY.register(Box::new(CONTAINER_MEM.clone())).unwrap();
 
     // Source : https://stackoverflow.com/a/71279547
-    let (_addr, server) = warp::serve(api_routes)
-        .bind_with_graceful_shutdown(([0, 0, 0, 0], app_port), async {
+    let (_addr, server) =
+        warp::serve(api_routes).bind_with_graceful_shutdown(([0, 0, 0, 0], app_port), async {
             tokio::signal::ctrl_c().await.ok();
         });
 
@@ -74,7 +80,7 @@ async fn main() {
     let res_prune_images = prune_images().await;
     match res_prune_images {
         Ok(_) => println!("✅ Docker images pruned successfully"),
-        Err(e) => eprintln!("❌ Failed to prune Docker images: {}", e)
+        Err(e) => eprintln!("❌ Failed to prune Docker images: {}", e),
     }
 
     println!("🚀 Check if Docker Swarm is initialized...");
@@ -95,7 +101,7 @@ async fn main() {
                     }
                 }
             }
-        },
+        }
         Err(e) => {
             println!("❌ Failed to check Docker Swarm: {}", e);
             return;
@@ -114,32 +120,73 @@ async fn main() {
 
     println!("🚀 Server running on http://{}:{}", ip_addr, app_port);
 
-    match tokio::join!(tokio::task::spawn(server)).0 {
-        Ok(()) => println!("serving"),
-        Err(e) => println!("ERROR: Thread join error {}", e)
-    };
+    // Créer un canal pour la notification de shutdown
+    let (shutdown_tx, mut shutdown_rx) = broadcast::channel(1);
 
-    println!("🛑 Terminating Nephelios Stack...");
-    let result_rm_stack = stop_nephelios_stack();
-    match result_rm_stack {
-        Ok(_) => println!("✅ Nephelios Stack terminated successfully"),
-        Err(e) => eprintln!("❌ Failed to terminate Nephelios Stack: {}", e)
+    // Gérer les signaux système
+    let shutdown_tx_clone = shutdown_tx.clone();
+    tokio::spawn(async move {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut sigterm = signal(SignalKind::terminate()).unwrap();
+        let mut sigint = signal(SignalKind::interrupt()).unwrap();
+        let mut sighup = signal(SignalKind::hangup()).unwrap();
+
+        tokio::select! {
+            _ = sigterm.recv() => println!("\n🛑 Received SIGTERM signal"),
+            _ = sigint.recv() => println!("\n🛑 Received SIGINT signal"),
+            _ = sighup.recv() => println!("\n🛑 Received SIGHUP signal"),
+        }
+        shutdown_tx_clone.send(()).ok();
+    });
+
+    // Démarrer le serveur
+    let server_handle = tokio::spawn(server);
+
+    // Attendre soit le signal de shutdown, soit une erreur du serveur
+    tokio::select! {
+        _ = shutdown_rx.recv() => {
+            println!("🛑 Starting cleanup process...");
+        }
+        result = server_handle => {
+            if let Err(e) = result {
+                println!("ERROR: Server error {}", e);
+            }
+        }
     }
+
+    // Cleanup process avec timeout
+    println!("🛑 Terminating Nephelios Stack...");
+    let cleanup_timeout = tokio::time::Duration::from_secs(10);
+
+    match tokio::time::timeout(cleanup_timeout, async {
+        match stop_nephelios_stack() {
+            Ok(_) => println!("✅ Nephelios Stack terminated successfully"),
+            Err(e) => eprintln!("❌ Failed to terminate Nephelios Stack: {}", e),
+        }
+    })
+    .await
+    {
+        Ok(_) => println!("✅ Cleanup completed within timeout"),
+        Err(_) => eprintln!(
+            "❌ Cleanup timed out after {} seconds",
+            cleanup_timeout.as_secs()
+        ),
+    };
 
     if env::var("LEAVE_SWARM").unwrap_or_else(|_| "false".to_string()) == "true" {
         println!("🛑 Leaving Docker Swarm...");
-        let result_leave_swarm = leave_swarm();
-        match result_leave_swarm {
-            Ok(_) => println!("✅ Left Docker Swarm successfully"),
-            Err(e) => eprintln!("❌ Failed to leave Docker Swarm: {}", e)
+        if let Err(e) = leave_swarm() {
+            eprintln!("❌ Failed to leave Docker Swarm: {}", e);
+        } else {
+            println!("✅ Left Docker Swarm successfully");
         }
     }
 
     println!("🛑 Pruning Docker images...");
-    let res_prune_images = prune_images().await;
-    match res_prune_images {
-        Ok(_) => println!("✅ Docker images pruned successfully"),
-        Err(e) => eprintln!("❌ Failed to prune Docker images: {}", e)
+    if let Err(e) = prune_images().await {
+        eprintln!("❌ Failed to prune Docker images: {}", e);
+    } else {
+        println!("✅ Docker images pruned successfully");
     }
 
     println!("👋 Goodbye!");
