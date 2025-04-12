@@ -3,6 +3,8 @@ services:
     build: .
     restart: always
     container_name: nephelios
+    labels:
+      - "com.nephelios.name=nephelios"
     env_file:
       - .env
     volumes:
@@ -15,14 +17,7 @@ services:
       - grafana_dashboard:/app/config/dashboards
     ports:
       - "3030:3030"
-    networks:
-      - nephelios_overlay
 
-networks:
-  nephelios_overlay:
-    driver: overlay
-    name: nephelios_overlay
-    attachable: true
 
 
 volumes:
@@ -35,9 +30,11 @@ volumes:
   grafana_dashboard:
     name: grafana_dashboard
 
+  letsencrypt:
+    name: letsencrypt
+
   prometheus_data:
     name: prometheus_data
-
 
   registry_data:
     name: registry_data

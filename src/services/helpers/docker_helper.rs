@@ -551,6 +551,57 @@ pub async fn push_image(app_name: &str) -> Result<(), String> {
 /// # Returns
 /// * `Ok(())` if the Docker Compose command was successful.
 /// * `Err(String)` if there was an error during execution.
+/// Connects the Nephelios container to the overlay network after Swarm initialization
+///
+/// This function uses the Docker API to:
+/// 1. Find the Nephelios container
+/// 2. Connect it to the nephelios_overlay network
+///
+/// # Returns
+/// * `Ok(())` if the connection was successful
+/// * `Err(String)` if there was an error during the process
+pub async fn connect_to_overlay_network() -> Result<(), String> {
+    let docker = Docker::connect_with_local_defaults()
+        .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
+
+    // Find the Nephelios container using its unique label
+    let mut filters = HashMap::new();
+    filters.insert("label", vec!["com.nephelios.name=nephelios"]);
+    
+    let options = Some(ListContainersOptions {
+        filters,
+        ..Default::default()
+    });
+
+    let containers = docker
+        .list_containers(options)
+        .await
+        .map_err(|e| format!("Failed to list containers: {}", e))?;
+
+    let container = containers
+        .first()
+        .ok_or("Nephelios container not found".to_string())?;
+
+    let container_id = container
+        .id
+        .as_ref()
+        .ok_or("Container ID not found".to_string())?;
+
+    // Connect to the overlay network
+    docker
+        .connect_network(
+            "nephelios_overlay",
+            bollard::network::ConnectNetworkOptions {
+                container: container_id.to_string(),
+                endpoint_config: bollard::models::EndpointSettings::default(),
+            },
+        )
+        .await
+        .map_err(|e| format!("Failed to connect to overlay network: {}", e))?;
+
+    Ok(())
+}
+
 pub fn deploy_nephelios_stack() -> Result<(), String> {
     let status = Command::new("docker")
         .current_dir("./")

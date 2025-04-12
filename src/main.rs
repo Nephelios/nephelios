@@ -8,8 +8,8 @@ use crate::routes::{
 use crate::services::websocket::ws_route;
 
 use crate::services::helpers::docker_helper::{
-    check_swarm, deploy_nephelios_stack, init_swarm, leave_swarm, prune_images,
-    stop_nephelios_stack,
+    check_swarm, connect_to_overlay_network, deploy_nephelios_stack, init_swarm, leave_swarm,
+    prune_images, stop_nephelios_stack,
 };
 use std::env;
 use tokio::sync::broadcast;
@@ -111,7 +111,14 @@ async fn main() {
     println!("🚀 Starting Nephelios Stack...");
     let result_start_stack = deploy_nephelios_stack();
     match result_start_stack {
-        Ok(_) => println!("✅ Nephelios Stack started successfully"),
+        Ok(_) => {
+            println!("✅ Nephelios Stack started successfully");
+            println!("🔗 Connecting Nephelios to overlay network...");
+            match connect_to_overlay_network().await {
+                Ok(_) => println!("✅ Connected to overlay network successfully"),
+                Err(e) => eprintln!("⚠️  Failed to connect to overlay network: {}", e)
+            }
+        },
         Err(e) => {
             eprintln!("❌ Failed to start Nephelios Stack: {}", e);
             return;

@@ -2,7 +2,9 @@ version: '3.8'
 
 networks:
   nephelios_overlay:
-    external: true
+    name: nephelios_overlay
+    driver: overlay
+    attachable: true
 
 volumes:
   grafana_data:
@@ -22,6 +24,9 @@ volumes:
     external: true
   grafana_dashboard:
     name: grafana_dashboard
+    external: true
+  letsencrypt:
+    name: letsencrypt
     external: true
 
 services:
@@ -58,6 +63,7 @@ services:
       - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - letsencrypt:/letsencrypt
     deploy:
       placement:
         constraints:
