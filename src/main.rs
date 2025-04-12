@@ -134,9 +134,27 @@ async fn main() {
     let shutdown_tx_clone = shutdown_tx.clone();
     tokio::spawn(async move {
         use tokio::signal::unix::{signal, SignalKind};
-        let mut sigterm = signal(SignalKind::terminate()).unwrap();
-        let mut sigint = signal(SignalKind::interrupt()).unwrap();
-        let mut sighup = signal(SignalKind::hangup()).unwrap();
+        let mut sigterm = match signal(SignalKind::terminate()) {
+            Ok(signal) => signal,
+            Err(e) => {
+                eprintln!("❌ Failed to register SIGTERM handler: {}", e);
+                return;
+            }
+        };
+        let mut sigint = match signal(SignalKind::interrupt()) {
+            Ok(signal) => signal,
+            Err(e) => {
+                eprintln!("❌ Failed to register SIGINT handler: {}", e);
+                return;
+            }
+        };
+        let mut sighup = match signal(SignalKind::hangup()) {
+            Ok(signal) => signal,
+            Err(e) => {
+                eprintln!("❌ Failed to register SIGHUP handler: {}", e);
+                return;
+            }
+        };
 
         tokio::select! {
             _ = sigterm.recv() => println!("\n🛑 Received SIGTERM signal"),
