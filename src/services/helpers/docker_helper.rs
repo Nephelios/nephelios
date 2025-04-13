@@ -923,6 +923,20 @@ pub async fn scale_app(app_name: &str, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Parses the network I/O string from Docker stats.
+///
+/// This function takes a string formatted like "42kB / 252B", representing
+/// incoming and outgoing network data. It splits the string and converts
+/// each part to kilobytes.
+///
+/// # Arguments
+///
+/// * `net_io` - A string slice representing the network I/O, e.g., "42kB / 252B".
+///
+/// # Returns
+///
+/// A tuple `(f64, f64)` representing `(net_in_kb, net_out_kb)`.
+
 fn parse_network_io(net_io: &str) -> (f64, f64) {
     // Format is typically like "42kB / 252B"
     let parts: Vec<&str> = net_io.split('/').collect();
@@ -940,6 +954,19 @@ fn parse_network_io(net_io: &str) -> (f64, f64) {
     (net_in, net_out)
 }
 
+/// Parses a human-readable data size string into kilobytes.
+///
+/// This function supports units such as B, KB, MB, GB, and TB,
+/// and converts them to kilobytes for consistent internal usage.
+///
+/// # Arguments
+///
+/// * `size_str` - A string slice like "42kB", "1.2MB", etc.
+///
+/// # Returns
+///
+/// The size converted to kilobytes (`f64`).
+/// 
 fn parse_data_size(size_str: &str) -> f64 {
     let re = regex::Regex::new(r"([0-9.]+)\s*([a-zA-Z]+)").unwrap();
     if let Some(caps) = re.captures(size_str) {
@@ -960,6 +987,31 @@ fn parse_data_size(size_str: &str) -> f64 {
     }
 }
 
+/// Updates Prometheus metrics by parsing `docker stats`, filtering only `nephelios` containers.
+///
+/// This asynchronous function executes `docker stats --no-stream` to gather
+/// live statistics about running Docker containers. It parses the JSON output
+/// and updates Prometheus metrics for CPU usage, memory usage, and network I/O
+/// — **but only for containers whose names start with `nephelios`**.
+///
+/// # Behavior
+///
+/// - Resets all container metrics before collecting new ones.
+/// - Filters out any container whose name does not begin with `"nephelios"`.
+/// - Parses each stat field and updates the corresponding Prometheus gauges.
+///
+/// # Returns
+///
+/// * `Ok(())` on successful metrics update.
+/// * `Err` if the command execution or data parsing fails.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The `docker stats` command fails to execute,
+/// - The output is not valid UTF-8,
+/// - The JSON parsing fails for any line.
+
 pub async fn update_metrics() -> Result<(), Box<dyn std::error::Error>> {
     let output = std::process::Command::new("docker")
         .arg("stats")
@@ -979,6 +1031,11 @@ pub async fn update_metrics() -> Result<(), Box<dyn std::error::Error>> {
     for line in lines {
         let data: serde_json::Value = serde_json::from_str(line)?;
         let name = data["Name"].as_str().unwrap_or("unknown");
+
+        if !name.starts_with("nephelios") {
+            continue;
+        }
+
         let cpu = parse_percentage(data["CPUPerc"].as_str().unwrap_or("0%"));
         let mem = parse_memory(data["MemUsage"].as_str().unwrap_or("0MiB / 0MiB"));
         let (net_in, net_out) = parse_network_io(data["NetIO"].as_str().unwrap_or("0kB / 0B"));
@@ -992,9 +1049,32 @@ pub async fn update_metrics() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Parses a percentage string like "42.5%" into a floating-point value.
+///
+/// # Arguments
+///
+/// * `val` - A string slice representing the percentage (e.g., "42.5%").
+///
+/// # Returns
+///
+/// A `f64` value of the percentage, or 0.0 if parsing fails.
+
 fn parse_percentage(val: &str) -> f64 {
     val.trim_end_matches('%').parse::<f64>().unwrap_or(0.0)
 }
+
+/// Parses memory usage from a Docker-formatted string.
+///
+/// It extracts the first part of the memory usage string (e.g., "512MiB / 2GiB")
+/// and converts it to a floating-point value, currently only stripping the unit.
+///
+/// # Arguments
+///
+/// * `val` - A string slice in the format "XMiB / YMiB".
+///
+/// # Returns
+///
+/// A `f64` value representing the memory usage in MiB.
 
 fn parse_memory(val: &str) -> f64 {
     val.split('/')
