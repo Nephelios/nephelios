@@ -669,6 +669,15 @@ pub async fn disconnect_from_overlay_network() -> Result<(), String> {
     Ok(())
 }
 
+/// Connects the Nephelios container to the `nephelios_overlay` network.
+///
+/// This function locates the Nephelios container using its label and connects it to the
+/// specified Docker overlay network.
+///
+/// # Returns
+/// * `Ok(())` if successful.
+/// * `Err(String)` if an error occurs during connection or container lookup.
+
 pub async fn connect_to_overlay_network() -> Result<(), String> {
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
@@ -710,6 +719,15 @@ pub async fn connect_to_overlay_network() -> Result<(), String> {
 
     Ok(())
 }
+
+/// Deploys the Nephelios stack using the `docker stack deploy` command.
+///
+/// This function runs the `docker stack deploy` command with the `nephelios.yml` file
+/// to deploy the Nephelios stack.
+///
+/// # Returns
+/// * `Ok(())` if the deployment is successful.
+/// * `Err(String)` if the deployment command fails.
 
 pub fn deploy_nephelios_stack() -> Result<(), String> {
     let status = Command::new("docker")
