@@ -1005,30 +1005,14 @@ fn parse_data_size(size_str: &str) -> f64 {
     }
 }
 
-/// Updates Prometheus metrics by parsing `docker stats`, filtering only `nephelios` containers.
+/// Updates Prometheus metrics by parsing `docker stats` for `nephelios` containers.
 ///
-/// This asynchronous function executes `docker stats --no-stream` to gather
-/// live statistics about running Docker containers. It parses the JSON output
-/// and updates Prometheus metrics for CPU usage, memory usage, and network I/O
-/// — **but only for containers whose names start with `nephelios`**.
-///
-/// # Behavior
-///
-/// - Resets all container metrics before collecting new ones.
-/// - Filters out any container whose name does not begin with `"nephelios"`.
-/// - Parses each stat field and updates the corresponding Prometheus gauges.
+/// This function gathers statistics for CPU, memory, and network I/O of containers
+/// whose names start with `nephelios` and updates the corresponding Prometheus metrics.
 ///
 /// # Returns
-///
-/// * `Ok(())` on successful metrics update.
-/// * `Err` if the command execution or data parsing fails.
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - The `docker stats` command fails to execute,
-/// - The output is not valid UTF-8,
-/// - The JSON parsing fails for any line.
+/// * `Ok(())` if the update is successful.
+/// * `Err(String)` if the command or parsing fails.
 
 pub async fn update_metrics() -> Result<(), Box<dyn std::error::Error>> {
     let output = std::process::Command::new("docker")
