@@ -4,6 +4,7 @@ use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
+use regex::Regex;
 
 /// Verifies if the application is already deployed.
 ///
@@ -122,7 +123,51 @@ pub fn remove_app_compose(app_name: &str) -> io::Result<()> {
     
     let mut file = fs::File::create(&path)?;
     file.write_all(new_content.as_bytes())?;
-    
-    Ok(())
 
+    Ok(())
+}
+
+/// Updates the number of replicas for an application in the nephelios.yml file.
+///
+/// # Arguments
+///
+/// * `app_name` - The name of the application to update.
+/// * `replicas` - The new number of replicas.
+///
+/// # Returns
+///
+/// A `Result` indicating success or an I/O error.
+pub fn update_app_replicas(app_name: &str, replicas: u32) -> io::Result<()> {
+    let path = PathBuf::from("./nephelios.yml");
+    
+    if !path.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "The file nephelios.yml does not exist"
+        ));
+    }
+    
+    let content = fs::read_to_string(&path)?;    
+    if !content.contains(&format!("{}:", app_name)) {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("Application {} not found in the file nephelios.yml", app_name)        ));
+    }
+    
+    let pattern = format!(r"(?m)^(\s*{}:\s*(?:\r?\n.*?)*?\breplicas:\s*)(\d+)", regex::escape(app_name));    
+    let re = Regex::new(&pattern).map_err(|e| {
+        io::Error::new(io::ErrorKind::InvalidInput, format!("Error while creating the regex: {}", e))    })?;
+    
+    if re.is_match(&content) {
+        let new_content = re.replace_all(&content, |caps: &regex::Captures| {
+            format!("{}{}", &caps[1], replicas)
+        });
+        
+        fs::write(&path, new_content.as_bytes())?;
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("Pattern 'replicas:' not found for the application {}", app_name)        ))
+    }
 }
