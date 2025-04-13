@@ -66,69 +66,58 @@ pub struct AppInfo {
     pub swarm_task_name: Option<String>,
 }
 
+/// Lists all deployed applications in the Nephelios stack.
+///
+/// This function connects to the Docker daemon, retrieves all services, and filters them
+/// based on the `com.docker.stack.namespace` label to identify services belonging to the
+/// Nephelios stack. It then extracts application metadata from the service labels and
+/// retrieves the status of each application.
+///
+/// # Returns
+/// * `Ok(Vec<AppInfo>)` - A vector of `AppInfo` objects representing the deployed applications.
+/// * `Err(String)` - An error message if the operation fails.
+
 pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
 
-    // Create filters to get all containers
-    let containers = docker
-        .list_containers(Some(ListContainersOptions::<String> {
-            all: true,
-            ..Default::default()
-        }))
+    let services = docker
+    .list_services::<String>(None)
         .await
-        .map_err(|e| format!("Failed to list containers: {}", e))?;
+        .map_err(|e| format!("Failed to list services: {}", e))?;
 
     let mut apps = Vec::new();
 
-    // Iterate over containers and check for nephelios namespace
-    for container in containers {
-        // Get detailed container information
-        if let Some(container_id) = &container.id {
-            let inspect_result = docker
-                .inspect_container(container_id, None)
-                .await
-                .map_err(|e| format!("Failed to inspect container: {}", e));
-
-            if let Ok(inspect_data) = inspect_result {
-                // Check if the container has the required labels
-                if let Some(labels) = inspect_data.config.and_then(|c| c.labels) {
-                    // First check if this container belongs to the nephelios stack
-                    if let Some(namespace) = labels.get("com.docker.stack.namespace") {
-                        if namespace == "nephelios" {
-                            // Then check for our app labels
-                            if let (
-                                Some(name),
-                                Some(app_type),
-                                Some(url),
-                                Some(domain),
-                                Some(created),
-                            ) = (
-                                labels.get("com.myapp.name"),
-                                labels.get("com.myapp.type"),
-                                labels.get("com.myapp.github_url"),
-                                labels.get("com.myapp.domain"),
-                                labels.get("com.myapp.created_at"),
-                            ) {
-                                let app_status = get_app_status(name.to_string()).await;
-
-                                // Use the task ID as container_id if available
-                                let task_name = labels
-                                    .get("com.docker.swarm.task.name")
-                                    .map(|id| id.clone())
-                                    .unwrap_or_else(|| container_id.clone());
-
-                                // Collect app info
-                                apps.push(AppInfo {
-                                    app_name: name.clone(),
-                                    app_type: app_type.clone(),
-                                    github_url: url.clone(),
-                                    domain: domain.clone(),
-                                    created_at: created.clone(),
-                                    status: app_status,
-                                    swarm_task_name: Some(task_name),
-                                });
-                            }
+    for service in services {
+        if let Some(spec) = &service.spec {
+            if let Some(labels) = &spec.labels {
+                if let Some(namespace) = labels.get("com.docker.stack.namespace") {
+                    if namespace == "nephelios" {
+                        if let (
+                            Some(name),
+                            Some(app_type),
+                            Some(url),
+                            Some(domain),
+                            Some(created),
+                        ) = (
+                            labels.get("com.myapp.name"),
+                            labels.get("com.myapp.type"),
+                            labels.get("com.myapp.github_url"),
+                            labels.get("com.myapp.domain"),
+                            labels.get("com.myapp.created_at"),
+                        ) {
+                            let app_status = get_app_status(name.to_string()).await;
+                            let service_id = service.id.clone().unwrap_or_default();
+                            
+                            apps.push(AppInfo {
+                                app_name: name.clone(),
+                                app_type: app_type.clone(),
+                                github_url: url.clone(),
+                                domain: domain.clone(),
+                                created_at: created.clone(),
+                                status: app_status,
+                                swarm_task_name: Some(service_id),
+                            });
                         }
                     }
                 }
@@ -136,21 +125,70 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
         }
     }
 
-    // Sort by creation date, newest first
     apps.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
     Ok(apps)
 }
 
+/// Retrieves the status of the specified application.
+///
+/// This function checks if the application is running, stopping, or stopped
+/// by using helper functions `is_app_running` and `is_app_stopping`.
+///
+/// # Arguments
+/// * `name` - The name of the application whose status is to be retrieved.
+///
+/// # Returns
+/// * A `String` representing the status of the application:
+///   - `"running"` if the application is currently running.
+///   - `"stopping"` if the application is in the process of stopping.
+///   - `"stopped"` if the application is not running.
+///   - `"unknown"` if the status could not be determined.
 pub async fn get_app_status(name: String) -> String {
     let mut app_status: &str = "unknown";
 
-    if let Ok(res) = is_app_running(name).await {
+    if let Ok(res) = is_app_running(name.clone()).await {
         if res {
             app_status = "running";
+        } else {
+            if let Ok(is_stopping) = is_app_stopping(name).await {
+                if is_stopping {
+                    app_status = "stopping";
+                } else {
+                    app_status = "stopped";
+                }
+            }
         }
     }
     app_status.to_string()
+}
+
+/// Checks if the application is in the "stopping" state by inspecting its Docker service.
+///
+/// This function executes the `docker service ls` command to check the replica status
+/// of the specified application. If the replicas are `0/0`, it indicates that the application
+/// is in the process of stopping.
+///
+/// # Arguments
+/// * `name` - The name of the application to check.
+///
+/// # Returns
+/// * `Ok(true)` if the application is in the "stopping" state (replicas are `0/0`).
+/// * `Ok(false)` if the application is not in the "stopping" state.
+/// * `Err(String)` if there is an error executing the command or parsing the output.
+async fn is_app_stopping(name: String) -> Result<bool, String> {
+    let output = Command::new("docker")
+        .args(&["service", "ls", "--filter", &format!("name=nephelios_{}", name), "--format", "{{.Replicas}}"])
+        .output()
+        .map_err(|e| format!("Failed to execute docker service ls: {}", e))?;
+    
+    let replicas = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    
+    if replicas == "0/0" {
+        return Ok(true);
+    }
+    
+    Ok(false)
 }
 
 pub async fn get_app_details(name: String) -> (String, Option<String>) {
@@ -198,11 +236,24 @@ pub async fn get_app_details(name: String) -> (String, Option<String>) {
     (status, swarm_name)
 }
 
+/// Checks if the specified application is currently running.
+///
+/// This function connects to the Docker daemon and lists containers with a specific label
+/// (`com.myapp.name=<app_name>`). If any container with the given label is in the "running"
+/// state, the function returns `true`.
+///
+/// # Arguments
+/// * `name` - The name of the application to check.
+///
+/// # Returns
+/// * `Ok(true)` if a container with the specified label is running.
+/// * `Ok(false)` if no container with the specified label is running.
+/// * `Err(String)` if there is an error connecting to Docker or listing containers.
 async fn is_app_running(name: String) -> Result<bool, String> {
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
 
-    let containers = docker
+        let containers = docker
         .list_containers(Some(ListContainersOptions {
             filters: {
                 let mut filters = HashMap::new();
@@ -903,43 +954,6 @@ pub async fn prune_images() -> Result<(), String> {
     Ok(())
 }
 
-/// Scales a Docker service.
-///
-/// This function modifies the number of replicas for a given Docker service by executing
-/// the `docker service scale` command. The service name is dynamically constructed using
-/// the provided application name and identifier.
-///
-/// # Arguments
-///
-/// * `app_name` - A string slice that represents the application name.
-/// * `id` - A string slice that represents the identifier used to scale the service.
-///
-/// # Returns
-///
-/// * `Ok(())` if the scaling operation was successful.
-/// * `Err(String)` if there was an error executing the Docker command.
-///
-/// # Errors
-///
-/// This function returns an error if the `docker` command fails to execute
-/// or if the scaling operation does not complete successfully.
-pub async fn scale_app(app_name: &str, id: &str) -> Result<(), String> {
-    let scale_arg = format!("nephelios_{}={}", app_name, id); // Concaténer le nom et "=0"
-
-    let status = Command::new("docker")
-        .current_dir("./")
-        .arg("service")
-        .arg("scale")
-        .arg(&scale_arg) // Passer l'argument correctement
-        .status()
-        .map_err(|e| format!("Failed to execute docker command: {}", e))?;
-
-    if !status.success() {
-        return Err("Docker service scale command failed".to_string());
-    }
-
-    Ok(())
-}
 
 /// Parses the network I/O string from Docker stats.
 ///

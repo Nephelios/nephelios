@@ -1,11 +1,10 @@
 use crate::metrics::REGISTRY;
 use crate::services::helpers::docker_helper::{
     build_image, deploy_nephelios_stack, generate_and_write_dockerfile, get_app_details,
-    list_deployed_apps, prune_images, push_image, remove_service, scale_app, update_metrics,
-    AppMetadata,
+    list_deployed_apps, prune_images, push_image, remove_service, update_metrics, AppMetadata,
 };
 use crate::services::helpers::github_helper::{clone_repo, create_temp_dir, remove_temp_dir};
-use crate::services::helpers::traefik_helper::{add_to_deploy, remove_app_compose, verif_app};
+use crate::services::helpers::traefik_helper::{add_to_deploy, remove_app_compose, update_app_replicas, verif_app};
 use crate::services::websocket::{send_deployment_status, StatusSender};
 use prometheus::{Encoder, TextEncoder};
 use serde_json::json;
@@ -162,14 +161,19 @@ async fn handle_start_app(body: Value) -> Result<impl warp::Reply, warp::Rejecti
         .and_then(Value::as_str)
         .unwrap_or("default-app");
 
-    let scale: &str = "1";
-
-    let _ = scale_app(app_name, scale).await.map_err(|e| {
-        warp::reject::custom(CustomError(format!(
-            "Failed to scale service for app {}: {}",
+    if let Err(e) = update_app_replicas(app_name, 1) {
+        return Err(warp::reject::custom(CustomError(format!(
+            "Failed to update replicas for app {}: {}",
             app_name, e
-        )))
-    });
+        ))));
+    }
+
+    if let Err(e) = deploy_nephelios_stack() {
+        return Err(warp::reject::custom(CustomError(format!(
+            "Failed to deploy stack for app {}: {}",
+            app_name, e
+        ))));
+    }
 
     Ok(warp::reply::with_status(
         format!("start app: {}.", app_name),
@@ -194,15 +198,19 @@ async fn handle_stop_app(body: Value) -> Result<impl warp::Reply, warp::Rejectio
         .get("app_name")
         .and_then(Value::as_str)
         .unwrap_or("default-app");
-
-    let scale: &str = "0";
-
-    let _ = scale_app(app_name, scale).await.map_err(|e| {
-        warp::reject::custom(CustomError(format!(
-            "Failed to scale service for app {}: {}",
+    if let Err(e) = update_app_replicas(app_name, 0) {
+        return Err(warp::reject::custom(CustomError(format!(
+            "Failed to update replicas for app {}: {}",
             app_name, e
-        )))
-    });
+        ))));
+    }
+
+    if let Err(e) = deploy_nephelios_stack() {
+        return Err(warp::reject::custom(CustomError(format!(
+            "Failed to deploy stack for app {}: {}",
+            app_name, e
+        ))));
+    }
 
     Ok(warp::reply::with_status(
         format!("stop app: {}.", app_name),
