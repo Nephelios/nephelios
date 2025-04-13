@@ -120,4 +120,30 @@ services:
       placement:
         constraints:
           - node.role == manager
+  nephelios-front:
+    image: zuhowks/nephelios-front:latest
+    networks:
+      - nephelios_overlay
+    deploy:
+      labels:
+          - "traefik.enable=true"
+          - "traefik.http.routers.nephelios.rule=Host(`nephelios.localhost`)"
+          - "traefik.http.routers.nephelios.entrypoints=web,websecure"
+          - "traefik.http.routers.nephelios.tls.certresolver=myresolver"
+          - "traefik.http.services.nephelios.loadbalancer.server.port=4173"
+          - "com.myapp.name=nephelios"
+          - "com.myapp.image=zuhowks/nephelios-front:latest"
+          - "com.myapp.type=nodejs"
+          - "com.myapp.github_url=https://github.com/nephelios/nephelios-front"
+          - "com.myapp.domain=nephelios.localhost"
+          - "com.myapp.created_at={{ Utc::now().to_rfc3339() }}"
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 30s
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
 
