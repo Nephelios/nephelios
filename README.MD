@@ -32,7 +32,7 @@ Nephelios is a modern cloud platform that simplifies application deployment and 
 
 1. Clone the repository
    ```bash
-   git clone https://github.com/yourusername/nephelios.git
+   git clone https://github.com/Nephelios/nephelios.git
    cd nephelios
    ```
 
