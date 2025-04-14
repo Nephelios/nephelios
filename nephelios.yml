@@ -124,6 +124,8 @@ services:
     image: zuhowks/nephelios-front:latest
     networks:
       - nephelios_overlay
+    ports:
+      - "5173:5173"
     deploy:
       labels:
           - "traefik.enable=true"
