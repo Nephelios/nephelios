@@ -1,65 +1,116 @@
-# Nephelios: Rust-Based Platform-as-a-Service (PaaS) Agent
+# Nephelios Backend
 
-Welcome to the **Nephelios** repository! This project is the core of our open-source Platform-as-a-Service (PaaS) solution, designed to streamline cloud application deployment and management. Built with Rust, Nephelios offers a robust and efficient backend to support your applications seamlessly.
+## Overview
 
-## 🚀 Key Features
+Nephelios is a modern cloud platform that simplifies application deployment and management. The backend provides robust APIs and services for deploying, monitoring, and managing your applications in the cloud.
 
-- **Effortless Application Deployment**: Deploy your applications to the cloud with minimal configuration, allowing you to focus on development rather than infrastructure.
+## Features
 
-- **Real-Time Monitoring**: Track resource consumption and application performance in real-time, providing you with valuable insights and control.
+- **Application Deployment**: Deploy applications directly from GitHub repositories
+- **Real-Time Monitoring**: Track application performance and resource usage
+- **Scalability**: Scale applications dynamically with Docker Swarm
+- **Secure Environment**: Built-in security features for safe deployments
+- **Metrics and Dashboards**: Integrated Prometheus and Grafana for monitoring
 
-- **Scalability**: Easily scale your applications to meet demand without manual intervention.
+## Tech Stack
 
-- **Secure Environment**: Benefit from built-in security features ensuring your applications run safely in the cloud.
+- **Language**: Rust
+- **Framework**: Warp (HTTP Server)
+- **Containerization**: Docker & Docker Swarm
+- **Monitoring**: Prometheus & Grafana
+- **Reverse Proxy**: Traefik
 
-## 🛠️ Getting Started
+## Getting Started
 
-To get started with Nephelios:
+### Prerequisites
 
-1. **Clone the Repository**:
+- Rust (latest stable version)
+- Docker & Docker Compose
+- Prometheus & Grafana (optional for monitoring)
+
+### Installation
+
+1. Clone the repository
    ```bash
-   git clone https://github.com/Nephelios/nephelios.git
+   git clone https://github.com/yourusername/nephelios.git
    cd nephelios
    ```
 
-2. **Install Dependencies**:
-   Ensure you have [Rust](https://www.rust-lang.org/) installed. Then, build the project:
+2. Install dependencies
    ```bash
    cargo build --release
    ```
 
-3. **Configure the Environment**:
-   Copy the example environment file and adjust configurations as needed:
+3. Set up environment variables
    ```bash
-   cp .env.example .env
+   # Create a .env file in the root directory and add:
+   NEPHELIOS_PORT=3030
+   NEPHELIOS_APPS_PORT=5173
+   ADVERTISE_ADDR=<your-ip-address>
+   LEAVE_SWARM=false
    ```
 
-4. **Run the Agent**:
-   Start the Nephelios agent:
+### Development
+
+Start the development server:
+
+```bash
+cargo run
+```
+
+The application will be available at `http://localhost:3030`.
+
+### Building for Production
+
+```bash
+cargo build --release
+```
+
+The built binary will be in the `target/release` directory.
+
+## Docker Deployment
+
+Nephelios backend can be easily deployed using Docker:
+
+1. Build the Docker image:
    ```bash
-   cargo run --release
+   docker build -t nephelios-backend .
    ```
 
-## 📂 Project Structure
+2. Run the container:
+   ```bash
+   docker-compose up
+   ```
 
-Here's an overview of the repository structure:
+## Project Structure
 
 ```
 nephelios/
 ├── src/
-│   ├── main.rs          # Entry point of the application
-│   ├── routes.rs        # HTTP route definitions
-│   └── services/
-│       ├── app_service.rs      # Manages application lifecycle
-│       ├── nginx_service.rs    # Handles NGINX configuration
-│       └── helpers/
-│           ├── github_helper.rs   # Utilities for GitHub interactions
-│           └── docker_helper.rs   # Utilities for Docker operations
-├── tests/               # Integration and unit tests
-├── .env.example         # Example environment configuration
-├── Cargo.toml           # Rust project configuration
-└── README.md            # This file
+│   ├── routes.rs       # HTTP route definitions
+│   ├── services/       # Core services for deployment and monitoring
+│   │   ├── helpers/    # Utility functions for Docker, GitHub, etc.
+│   │   └── websocket.rs # WebSocket for real-time updates
+│   ├── metrics.rs      # Prometheus metrics integration
+│   └── main.rs         # Application entry point
+├── tests/              # Integration and unit tests
+├── docker-compose.yml  # Docker Compose configuration
+├── Dockerfile          # Docker configuration
+├── prometheus.yml      # Prometheus configuration
+├── grafana/            # Grafana provisioning and dashboards
+├── nephelios.yml       # Nephelios-specific configuration file
+├── dashboards/         # Pre-configured Grafana dashboards
+├── .env                # Environment variables file
+└── Cargo.toml          # Rust project configuration
+
 ```
+
+## Environment Variables
+
+- `NEPHELIOS_PORT`: Port for the backend server (default: `3030`)
+- `NEPHELIOS_APPS_PORT`: Port for deployed applications (default: `5173`)
+- `ADVERTISE_ADDR`: IP address for Docker Swarm advertisement
+- `LEAVE_SWARM`: Whether to leave the Docker Swarm on shutdown (default: `false`)
 
 ## 🤝 Contributing
 
