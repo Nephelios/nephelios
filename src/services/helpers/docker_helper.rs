@@ -82,11 +82,12 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
 
     let services = docker
-    .list_services::<String>(None)
+        .list_services::<String>(None)
         .await
         .map_err(|e| format!("Failed to list services: {}", e))?;
 
     let mut apps = Vec::new();
+    let mut app_map: HashMap<String, AppInfo> = HashMap::new();
 
     for service in services {
         if let Some(spec) = &service.spec {
@@ -108,16 +109,20 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
                         ) {
                             let app_status = get_app_status(name.to_string()).await;
                             let service_id = service.id.clone().unwrap_or_default();
-                            
-                            apps.push(AppInfo {
-                                app_name: name.clone(),
-                                app_type: app_type.clone(),
-                                github_url: url.clone(),
-                                domain: domain.clone(),
-                                created_at: created.clone(),
-                                status: app_status,
-                                swarm_task_name: Some(service_id),
-                            });
+
+                            // Store in map for later enhancement with container info
+                            app_map.insert(
+                                name.clone(),
+                                AppInfo {
+                                    app_name: name.clone(),
+                                    app_type: app_type.clone(),
+                                    github_url: url.clone(),
+                                    domain: domain.clone(),
+                                    created_at: created.clone(),
+                                    status: app_status,
+                                    swarm_task_name: Some(service_id), // Default to service_id, will be updated if container info is found
+                                },
+                            );
                         }
                     }
                 }
@@ -125,6 +130,56 @@ pub async fn list_deployed_apps() -> Result<Vec<AppInfo>, String> {
         }
     }
 
+    let mut filters = HashMap::new();
+    filters.insert("label", vec!["com.docker.stack.namespace=nephelios"]);
+
+    let options = Some(ListContainersOptions {
+        all: true,
+        filters,
+        ..Default::default()
+    });
+
+    let containers = docker
+        .list_containers(options)
+        .await
+        .map_err(|e| format!("Failed to list containers: {}", e))?;
+
+    // Process containers to get swarm_task_name
+    for container in containers {
+        // Get detailed container information
+        if let Some(container_id) = &container.id {
+            let inspect_result = docker
+                .inspect_container(container_id, None)
+                .await
+                .map_err(|e| format!("Failed to inspect container: {}", e));
+
+            if let Ok(inspect_data) = inspect_result {
+                // Check if the container has the required labels
+                if let Some(labels) = inspect_data.config.and_then(|c| c.labels) {
+                    // First check if this container belongs to the nephelios stack
+                    if let Some(namespace) = labels.get("com.docker.stack.namespace") {
+                        if namespace == "nephelios" {
+                            // Get the app name to match with our existing apps
+                            if let Some(name) = labels.get("com.myapp.name") {
+                                // If we have this app in our map, update its swarm_task_name
+                                if let Some(app_info) = app_map.get_mut(name) {
+                                    // Use the task ID as container_id if available
+                                    if let Some(task_name) =
+                                        labels.get("com.docker.swarm.task.name")
+                                    {
+                                        app_info.swarm_task_name = Some(task_name.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Convert map to vector
+    apps = app_map.into_values().collect();
     apps.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
     Ok(apps)
@@ -178,23 +233,30 @@ pub async fn get_app_status(name: String) -> String {
 /// * `Err(String)` if there is an error executing the command or parsing the output.
 async fn is_app_stopping(name: String) -> Result<bool, String> {
     let output = Command::new("docker")
-        .args(&["service", "ls", "--filter", &format!("name=nephelios_{}", name), "--format", "{{.Replicas}}"])
+        .args(&[
+            "service",
+            "ls",
+            "--filter",
+            &format!("name=nephelios_{}", name),
+            "--format",
+            "{{.Replicas}}",
+        ])
         .output()
         .map_err(|e| format!("Failed to execute docker service ls: {}", e))?;
-    
+
     let replicas = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    
+
     if replicas == "0/0" {
         return Ok(true);
     }
-    
+
     Ok(false)
 }
 
 pub async fn get_app_details(name: String) -> (String, Option<String>) {
     let status = get_app_status(name.clone()).await;
     let mut swarm_name = None;
-    
+
     // Get container details to extract swarm task name
     let docker = match Docker::connect_with_local_defaults() {
         Ok(docker) => docker,
@@ -253,7 +315,7 @@ async fn is_app_running(name: String) -> Result<bool, String> {
     let docker = Docker::connect_with_local_defaults()
         .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
 
-        let containers = docker
+    let containers = docker
         .list_containers(Some(ListContainersOptions {
             filters: {
                 let mut filters = HashMap::new();
@@ -1042,7 +1104,6 @@ pub async fn prune_images() -> Result<(), String> {
     Ok(())
 }
 
-
 /// Parses the network I/O string from Docker stats.
 ///
 /// This function takes a string formatted like "42kB / 252B", representing
@@ -1086,7 +1147,7 @@ fn parse_network_io(net_io: &str) -> (f64, f64) {
 /// # Returns
 ///
 /// The size converted to kilobytes (`f64`).
-/// 
+///
 fn parse_data_size(size_str: &str) -> f64 {
     let re = regex::Regex::new(r"([0-9.]+)\s*([a-zA-Z]+)").unwrap();
     if let Some(caps) = re.captures(size_str) {
