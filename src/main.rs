@@ -142,6 +142,8 @@ async fn main() {
 
     println!("🚀 Server running on http://{}:{}", ip_addr, app_port);
 
+    println!("🚀 Front running on http://localhost:5173");
+
     // Créer un canal pour la notification de shutdown
     let (shutdown_tx, mut shutdown_rx) = broadcast::channel(1);
 
