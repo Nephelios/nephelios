@@ -12,9 +12,17 @@ Welcome to the **Nephelios** repository! This project is the core of our open-so
 
 - **Secure Environment**: Benefit from built-in security features ensuring your applications run safely in the cloud.
 
+- **Docker Integration**: Fully containerized solution with Docker and Docker Compose support for easy deployment and scaling.
+
+- **Service Orchestration**: Integrated with Docker Swarm for container orchestration and service management.
+
+- **Reverse Proxy & SSL**: Built-in Traefik integration for automatic routing and SSL certificate management.
+
 ## 🛠️ Getting Started
 
-To get started with Nephelios:
+You can run Nephelios either directly or using Docker Compose:
+
+### Standard Installation
 
 1. **Clone the Repository**:
    ```bash
@@ -40,26 +48,77 @@ To get started with Nephelios:
    cargo run --release
    ```
 
+### Docker Compose Installation
+
+1. **Clone the Repository**:
+   ```bash
+   git clone https://github.com/Nephelios/nephelios.git
+   cd nephelios
+   ```
+
+2. **Configure Environment**:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configuration
+   ```
+
+3. **Start with Docker Compose**:
+   ```bash
+   docker-compose up -d
+   ```
+   This will build and start the Nephelios service with all required configurations.
+
 ## 📂 Project Structure
 
 Here's an overview of the repository structure:
 
 ```
 nephelios/
-├── src/
-│   ├── main.rs          # Entry point of the application
-│   ├── routes.rs        # HTTP route definitions
-│   └── services/
+├── src/                # Source code directory
+│   ├── main.rs         # Entry point of the application
+│   ├── routes.rs       # HTTP route definitions
+│   └── services/       # Service implementations
 │       ├── app_service.rs      # Manages application lifecycle
 │       ├── nginx_service.rs    # Handles NGINX configuration
 │       └── helpers/
 │           ├── github_helper.rs   # Utilities for GitHub interactions
 │           └── docker_helper.rs   # Utilities for Docker operations
-├── tests/               # Integration and unit tests
-├── .env.example         # Example environment configuration
-├── Cargo.toml           # Rust project configuration
-└── README.md            # This file
+├── tests/              # Integration and unit tests
+├── .env.example        # Example environment configuration
+├── Cargo.toml          # Rust project configuration
+├── Dockerfile          # Container definition for building and running Nephelios
+├── docker-compose.yml  # Docker Compose configuration for local development
+├── nephelios.yml       # Service orchestration configuration
+├── prometheus.yml      # Prometheus monitoring configuration
+├── grafana/            # Grafana dashboard configurations
+├── dashboards/         # Custom monitoring dashboards
+└── README.md           # This file
 ```
+
+## 🛠️ Docker & Orchestration
+
+Nephelios uses Docker and Docker Compose for containerization and orchestration:
+
+### Docker Setup
+
+The project includes a multi-stage Dockerfile that:
+1. Builds the Rust application in a builder stage
+2. Creates a minimal runtime image with only necessary dependencies
+3. Includes Docker CLI for container management
+
+### Docker Compose
+
+The `docker-compose.yml` file provides a simple way to run Nephelios locally with all required configurations and volume mounts.
+
+### Service Orchestration
+
+The `nephelios.yml` configuration defines a complete service stack including:
+
+- **Registry**: Private Docker registry for application images
+- **Traefik**: Edge router for service discovery and SSL termination
+- **Prometheus**: Metrics collection and storage
+- **Grafana**: Metrics visualization and dashboards
+- **Nephelios Frontend**: User interface for the PaaS platform
 
 ## 🤝 Contributing
 
