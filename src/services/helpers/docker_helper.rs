@@ -468,15 +468,15 @@ pub fn generate_and_write_dockerfile(
             } else if uses_npm {
                 "npm"
             } else {
-                "bun"
+                println!("Unknown package manager");
+                "npm"
             };
 
             // Choose the base image based on the package manager
             let base_image = match package_manager {
-                "yarn" => "node:18-alpine".to_string(),
-                "pnpm" => "node:18-alpine".to_string(),
-                "npm" => "node:18-alpine".to_string(),
-                _ => "oven/bun:latest".to_string(),
+                "yarn" => "node:20-alpine".to_string(),
+                "pnpm" => "node:20-alpine".to_string(),
+                _ => "node:20-alpine".to_string(),
             };
 
             // Additional setup commands for package managers
@@ -487,6 +487,13 @@ pub fn generate_and_write_dockerfile(
                 }
                 "pnpm" => "RUN npm install -g pnpm".to_string(),
                 _ => "".to_string(), // No additional setup for npm or bun
+            };
+
+            let package_lock: String = match package_manager {
+                "yarn" => "yarn.lock".to_string(),
+                "pnpm" => "pnpm-lock.yaml".to_string(),
+                "npm" => "package-lock.json".to_string(),
+                _ => "".to_string(), // Default case for unknown package managers
             };
 
             // Determine the appropriate install command based on the package manager
@@ -519,26 +526,29 @@ pub fn generate_and_write_dockerfile(
             };
 
             format!(
-                r#"FROM {}
-WORKDIR {}
-{}
-{}
-{}
-COPY package.json ./
-RUN {}
-COPY . .
-{}
-EXPOSE {}
-{}"#,
-                base_image,
-                app_workdir,
-                labels,
-                env_vars,
-                setup_cmd,
-                install_cmd,
-                build_cmd,
-                deploy_port,
-                run_cmd
+                r#"FROM {base_image}
+WORKDIR {app_type}
+{labels}
+{env_vars}
+{setup_cmd}
+COPY {app_workdir}/package.json ./package.json
+COPY {app_workdir}/{package_lock} ./{package_lock}
+RUN {install_cmd}
+COPY {app_workdir}/ ./
+{build_cmd}
+EXPOSE {deploy_port}
+{run_cmd}"#,
+                base_image = base_image,
+                app_workdir = app_workdir,
+                app_type = app_type,
+                labels = labels,
+                env_vars = env_vars,
+                setup_cmd = setup_cmd,
+                install_cmd = install_cmd,
+                build_cmd = build_cmd,
+                deploy_port = deploy_port,
+                run_cmd = run_cmd,
+                package_lock = package_lock
             )
         }
         "python" => {
