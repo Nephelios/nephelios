@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["add_to_deploy","remove_app_compose","update_app_replicas","verif_app"]};
