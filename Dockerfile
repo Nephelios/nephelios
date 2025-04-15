@@ -49,4 +49,6 @@ COPY nephelios.yml /app/nephelios.yml
 
 WORKDIR /app
 
+EXPOSE 3030
+
 CMD ["/usr/local/bin/nephelios"]
