@@ -983,92 +983,6 @@ pub fn check_swarm() -> Result<bool, String> {
     Ok(String::from_utf8_lossy(&swarm_info.stdout).contains("Swarm: active"))
 }
 
-/// Ensures that all required Docker volumes exist for Nephelios.
-/// If any volume doesn't exist, it will be created.
-///
-/// # Returns
-/// * `Ok(())` if all volumes were successfully checked/created
-/// * `Err(String)` if there was an error during the process
-pub async fn ensure_volumes() -> Result<(), String> {
-    let docker = Docker::connect_with_local_defaults()
-        .map_err(|e| format!("Failed to connect to Docker: {}", e))?;
-
-    let required_volumes = vec![
-        NepheliosVolume {
-            name: "grafana_data",
-            mount_path: "/var/lib/nephelios/grafana",
-        },
-        NepheliosVolume {
-            name: "grafana_provisioning",
-            mount_path: "/app/config/grafana",
-        },
-        NepheliosVolume {
-            name: "grafana_dashboard",
-            mount_path: "/app/config/dashboards",
-        },
-        NepheliosVolume {
-            name: "prometheus_data",
-            mount_path: "/app/prometheus",
-        },
-        NepheliosVolume {
-            name: "registry_data",
-            mount_path: "/var/lib/nephelios/registry",
-        },
-        NepheliosVolume {
-            name: "nephelios_data",
-            mount_path: "/app/config/prometheus",
-        },
-    ];
-
-    for volume in required_volumes {
-        // Check if volume exists
-        let filters: HashMap<String, Vec<String>> = {
-            let mut map = HashMap::new();
-            map.insert("name".to_string(), vec![volume.name.to_string()]);
-            map
-        };
-
-        let options = bollard::volume::ListVolumesOptions { filters };
-
-        let volumes = docker
-            .list_volumes(Some(options))
-            .await
-            .map_err(|e| format!("Failed to list volumes: {}", e))?;
-
-        if volumes.volumes.is_none() || volumes.volumes.as_ref().unwrap().is_empty() {
-            println!("Creating volume: {}", volume.name);
-
-            // Créer le volume avec les options de montage
-            let mountpoint = volume.mount_path.to_string();
-            let mut labels = HashMap::new();
-            labels.insert("com.nephelios.mountpoint", mountpoint.as_str());
-
-            let options = bollard::volume::CreateVolumeOptions {
-                name: volume.name,
-                labels: labels,
-                ..Default::default()
-            };
-
-            docker
-                .create_volume(options)
-                .await
-                .map_err(|e| format!("Failed to create volume {}: {}", volume.name, e))?;
-
-            println!(
-                "✅ Volume {} created successfully (mount: {})",
-                volume.name, volume.mount_path
-            );
-        } else {
-            println!(
-                "✅ Volume {} already exists (mount: {})",
-                volume.name, volume.mount_path
-            );
-        }
-    }
-
-    Ok(())
-}
-
 /// Prunes unused Docker images.
 ///
 /// Connects to the local Docker daemon and removes all dangling images.
@@ -1250,11 +1164,4 @@ fn parse_memory(val: &str) -> f64 {
         .replace("GiB", "")
         .parse::<f64>()
         .unwrap_or(0.0)
-}
-
-/// Structure définissant un volume Nephelios et son point de montage
-#[derive(Debug)]
-struct NepheliosVolume {
-    name: &'static str,
-    mount_path: &'static str,
 }

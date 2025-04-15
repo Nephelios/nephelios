@@ -18,8 +18,6 @@ use warp::Filter;
 mod metrics;
 use crate::metrics::{CONTAINER_CPU, CONTAINER_MEM, CONTAINER_NET_IN, CONTAINER_NET_OUT, REGISTRY};
 
-use self::services::helpers::docker_helper::ensure_volumes;
-
 /// Entry point for the application.
 ///
 /// Initializes and starts the Warp server. The server listens on `127.0.0.1:3030`
@@ -89,13 +87,6 @@ async fn main() {
     match res_prune_images {
         Ok(_) => println!("✅ Docker images pruned successfully"),
         Err(e) => eprintln!("❌ Failed to prune Docker images: {}", e),
-    }
-
-    println!("🚀 Ensuring Docker volumes exist...");
-    let res_ensure_volumes = ensure_volumes().await;
-    match res_ensure_volumes {
-        Ok(_) => println!("✅ Docker volumes ensured successfully"),
-        Err(e) => eprintln!("❌ Failed to ensure Docker volumes: {}", e),
     }
 
     println!("🚀 Check if Docker Swarm is initialized...");
